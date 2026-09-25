@@ -65,6 +65,7 @@ public class AstralServerPayloadHandlers {
 
             entity.applyConfiguration(payload.characterId(), payload.skinId(), payload.x(), payload.y(), payload.z(), payload.yaw(), payload.scale(),
                     payload.customName(), payload.showName(), payload.speechText(), payload.speechImage(), payload.faceLookingPlayer(),
+                    payload.speechBubbleOffsetX(), payload.speechBubbleOffsetY(), payload.speechBubbleWidth(), payload.speechBubbleScale(),
                     payload.customSkinEnabled(), payload.customSkinPlayer(), payload.customSkinSource());
         });
     }

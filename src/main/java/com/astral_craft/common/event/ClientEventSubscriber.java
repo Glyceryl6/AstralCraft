@@ -5,6 +5,7 @@ import com.astral_craft.client.gui.*;
 import com.astral_craft.client.gui.board.*;
 import com.astral_craft.client.gui.appearance.AppearanceSelectionScreen;
 import com.astral_craft.client.gui.components.AstralConfirmationScreen;
+import com.astral_craft.client.gui.editor.AstralDataEditorScreen;
 import com.astral_craft.client.gui.character.AstralSkinRarityManager;
 import com.astral_craft.client.gui.character.CharacterSettingsScreen;
 import com.astral_craft.client.gui.character.ExhibitionCharacterConfigScreen;
@@ -86,6 +87,12 @@ public class ClientEventSubscriber {
         while (AstralKeyMappings.CHARACTER_SKILL.get().consumeClick()) {
             if (minecraft.player != null && minecraft.screen == null) {
                 ClientPacketDistributor.sendToServer(new RequestCharacterSkillPayload());
+            }
+        }
+
+        while (AstralKeyMappings.DATA_EDITOR.get().consumeClick()) {
+            if (minecraft.player != null && minecraft.screen == null) {
+                minecraft.setScreen(new AstralDataEditorScreen());
             }
         }
     }

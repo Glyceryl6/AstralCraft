@@ -27,6 +27,10 @@ public record OpenExhibitionCharacterConfigPayload(
         String speechText,
         String speechImage,
         boolean faceLookingPlayer,
+        float speechBubbleOffsetX,
+        float speechBubbleOffsetY,
+        float speechBubbleWidth,
+        float speechBubbleScale,
         boolean customSkinEnabled,
         boolean customSkinPlayer,
         String customSkinSource) implements CustomPacketPayload {
@@ -42,6 +46,7 @@ public record OpenExhibitionCharacterConfigPayload(
                 ByteBufCodecs.stringUtf8(ExhibitionCharacterEntity.MAX_CUSTOM_NAME_LENGTH).decode(buffer), ByteBufCodecs.BOOL.decode(buffer),
                 ByteBufCodecs.stringUtf8(ExhibitionCharacterEntity.MAX_SPEECH_LENGTH).decode(buffer),
                 ByteBufCodecs.stringUtf8(ExhibitionCharacterEntity.MAX_SPEECH_IMAGE_SOURCE_LENGTH).decode(buffer), ByteBufCodecs.BOOL.decode(buffer),
+                ByteBufCodecs.FLOAT.decode(buffer), ByteBufCodecs.FLOAT.decode(buffer), ByteBufCodecs.FLOAT.decode(buffer), ByteBufCodecs.FLOAT.decode(buffer),
                 ByteBufCodecs.BOOL.decode(buffer), ByteBufCodecs.BOOL.decode(buffer),
                 ByteBufCodecs.stringUtf8(ExhibitionCharacterEntity.MAX_CUSTOM_SKIN_SOURCE_LENGTH).decode(buffer));
     }
@@ -61,6 +66,10 @@ public record OpenExhibitionCharacterConfigPayload(
         ByteBufCodecs.stringUtf8(ExhibitionCharacterEntity.MAX_SPEECH_LENGTH).encode(buffer, this.speechText);
         ByteBufCodecs.stringUtf8(ExhibitionCharacterEntity.MAX_SPEECH_IMAGE_SOURCE_LENGTH).encode(buffer, this.speechImage);
         ByteBufCodecs.BOOL.encode(buffer, this.faceLookingPlayer);
+        ByteBufCodecs.FLOAT.encode(buffer, this.speechBubbleOffsetX);
+        ByteBufCodecs.FLOAT.encode(buffer, this.speechBubbleOffsetY);
+        ByteBufCodecs.FLOAT.encode(buffer, this.speechBubbleWidth);
+        ByteBufCodecs.FLOAT.encode(buffer, this.speechBubbleScale);
         ByteBufCodecs.BOOL.encode(buffer, this.customSkinEnabled);
         ByteBufCodecs.BOOL.encode(buffer, this.customSkinPlayer);
         ByteBufCodecs.stringUtf8(ExhibitionCharacterEntity.MAX_CUSTOM_SKIN_SOURCE_LENGTH).encode(buffer, this.customSkinSource);
