@@ -2,14 +2,14 @@
   "type": "minecraft:crafting_shaped",
   "category": "equipment",
   "key": {
-    "B": "minecraft:bell",
+    "A": "minecraft:amethyst_shard",
     "C": "minecraft:compass",
     "E": "minecraft:emerald",
     "R": "minecraft:redstone"
   },
   "pattern": [
-    " E ",
-    "BCB",
+    " A ",
+    "ECE",
     " R "
   ],
   "result": {

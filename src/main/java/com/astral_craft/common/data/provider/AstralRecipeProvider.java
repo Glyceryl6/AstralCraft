@@ -21,65 +21,27 @@ public class AstralRecipeProvider extends RecipeProvider {
     @Override
     protected void buildRecipes() {
         ShapedRecipeBuilder.shaped(this.registries.lookupOrThrow(Registries.ITEM), RecipeCategory.TOOLS,
-                        AstralItems.BOARD_SCANNER.get())
-                .pattern("GAG")
-                .pattern("RMR")
-                .pattern("IRI")
-                .define('G', Items.GLASS)
-                .define('A', Items.AMETHYST_SHARD)
-                .define('R', Items.REDSTONE)
-                .define('M', Items.MAP)
-                .define('I', Items.IRON_INGOT)
-                .unlockedBy("has_redstone", this.has(Items.REDSTONE))
-                .save(this.output);
-
-        ShapedRecipeBuilder.shaped(this.registries.lookupOrThrow(Registries.ITEM), RecipeCategory.TOOLS,
-                        AstralItems.BOARD_PROJECTOR.get())
-                .pattern("AEA")
-                .pattern("RPR")
-                .pattern("GMG")
-                .define('A', Items.AMETHYST_SHARD)
-                .define('E', Items.ENDER_EYE)
-                .define('R', Items.REDSTONE)
-                .define('P', AstralItems.BOARD_SCANNER.get())
-                .define('G', Items.GOLD_INGOT)
-                .define('M', Items.MAP)
-                .unlockedBy("has_board_scanner", this.has(AstralItems.BOARD_SCANNER.get()))
-                .save(this.output);
-
-        ShapedRecipeBuilder.shaped(this.registries.lookupOrThrow(Registries.ITEM), RecipeCategory.TOOLS,
-                        AstralItems.BOARD_SPECTATOR.get())
-                .pattern(" GE")
-                .pattern(" SG")
-                .pattern("P  ")
-                .define('G', Items.GLASS)
-                .define('E', Items.ENDER_EYE)
-                .define('S', Items.SPYGLASS)
-                .define('P', Items.PAPER)
-                .unlockedBy("has_spyglass", this.has(Items.SPYGLASS))
-                .save(this.output);
-
-        ShapedRecipeBuilder.shaped(this.registries.lookupOrThrow(Registries.ITEM), RecipeCategory.TOOLS,
                         AstralItems.BOARD_LOBBY.get())
-                .pattern(" E ")
-                .pattern("BCB")
+                .pattern(" A ")
+                .pattern("ECE")
                 .pattern(" R ")
+                .define('A', Items.AMETHYST_SHARD)
                 .define('E', Items.EMERALD)
-                .define('B', Items.BELL)
                 .define('C', Items.COMPASS)
                 .define('R', Items.REDSTONE)
                 .unlockedBy("has_compass", this.has(Items.COMPASS))
                 .save(this.output);
 
         ShapedRecipeBuilder.shaped(this.registries.lookupOrThrow(Registries.ITEM), RecipeCategory.TOOLS,
-                        AstralItems.BOARD_DISMANTLER.get())
-                .pattern("ISI")
-                .pattern("IRI")
-                .pattern(" I ")
-                .define('I', Items.IRON_INGOT)
-                .define('S', Items.SHEARS)
-                .define('R', Items.REDSTONE_TORCH)
-                .unlockedBy("has_shears", this.has(Items.SHEARS))
+                        AstralItems.BOARD_SPECTATOR.get())
+                .pattern("GSG")
+                .pattern(" R ")
+                .pattern(" B ")
+                .define('G', Items.GLASS)
+                .define('S', Items.SPYGLASS)
+                .define('R', Items.REDSTONE)
+                .define('B', Items.BOOK)
+                .unlockedBy("has_spyglass", this.has(Items.SPYGLASS))
                 .save(this.output);
     }
 
