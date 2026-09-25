@@ -27,12 +27,17 @@ public class AstralKeyMappings {
             "key.astral_craft.character_skill", KeyConflictContext.IN_GAME,
             InputConstants.UNKNOWN, CATEGORY));
 
+    public static final Lazy<KeyMapping> DATA_EDITOR = Lazy.of(() -> new KeyMapping(
+            "key.astral_craft.data_editor", KeyConflictContext.IN_GAME,
+            InputConstants.UNKNOWN, CATEGORY));
+
     public static void register(RegisterKeyMappingsEvent event) {
         event.registerCategory(CATEGORY);
         event.register(CARD_BACK_SELECTION.get());
         event.register(CHARACTER_SETTINGS.get());
         event.register(HAND_CARD_DECK.get());
         event.register(CHARACTER_SKILL.get());
+        event.register(DATA_EDITOR.get());
     }
 
 }
