@@ -20,21 +20,17 @@ public class BoardLobbyItem extends Item {
     public InteractionResult useOn(UseOnContext context) {
         if (context.getLevel().isClientSide()) return InteractionResult.SUCCESS;
         if (!(context.getPlayer() instanceof ServerPlayer player)) return InteractionResult.PASS;
-        BoardSession session = BoardSessionManager.findAt(player.level(), context.getClickedPos()).orElse(null);
+        if (BoardSessionManager.findByController(player).isPresent()) {
+            player.sendSystemMessage(Component.translatable("message.astral_craft.board.already_playing"), true);
+            return InteractionResult.FAIL;
+        }
+        BoardSession session = BoardSessionManager.acquireLobbySession(player, context.getClickedPos()).orElse(null);
         if (session == null) {
             player.sendSystemMessage(Component.translatable("message.astral_craft.board.not_registered"), true);
             return InteractionResult.FAIL;
         }
 
-        if (session.phase() == BoardPhase.PLAYING) {
-            player.sendSystemMessage(Component.translatable("message.astral_craft.board.already_playing"), true);
-            return InteractionResult.FAIL;
-        }
-
-        if (session.phase() == BoardPhase.FINISHED) {
-            BoardSessionManager.resetForLobby(player.level(), session);
-        }
-
+        if (session.phase() == BoardPhase.FINISHED) BoardSessionManager.resetForLobby(player.level(), session);
         if (session.phase() != BoardPhase.READY) {
             player.sendSystemMessage(Component.translatable("message.astral_craft.board.matchmaking.busy"), true);
             return InteractionResult.FAIL;

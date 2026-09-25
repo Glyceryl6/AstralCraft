@@ -87,11 +87,59 @@ public class BoardSessionManager {
         return data(level).sessions();
     }
 
-    public static Optional<BoardSession> findAt(ServerLevel level, BlockPos pos) {
+    public static List<BoardSession> sessionsAt(ServerLevel level, BlockPos pos) {
+        if (level == null || pos == null) return List.of();
         return data(level).sessions().stream()
-                .filter(session -> session.protectedArea().contains(pos)
-                        || session.positions().containsValue(pos))
-                .findFirst();
+                .filter(session -> session.protectedArea().contains(pos) || session.positions().containsValue(pos))
+                .toList();
+    }
+
+    public static List<BoardSession> venueSessions(ServerLevel level, BoardSession session) {
+        if (level == null || session == null) return List.of();
+        return data(level).sessions().stream().filter(candidate -> sameVenue(session, candidate)).toList();
+    }
+
+    public static boolean sameVenue(BoardSession first, BoardSession second) {
+        return first != null && second != null && first.dimension().equals(second.dimension())
+                && first.protectedArea().equals(second.protectedArea()) && first.positions().equals(second.positions());
+    }
+
+    public static boolean venueProtectionEnabled(ServerLevel level, BoardSession session) {
+        return venueSessions(level, session).stream().anyMatch(BoardSession::protectionEnabled);
+    }
+
+    public static boolean isVenueAnchor(ServerLevel level, BoardSession session) {
+        List<BoardSession> venue = venueSessions(level, session);
+        return !venue.isEmpty() && venue.getFirst().id().equals(session.id());
+    }
+
+    public static Optional<BoardSession> publicSessionForVenue(ServerLevel level, BoardSession session) {
+        return venueSessions(level, session).stream().filter(candidate -> candidate.phase() == BoardPhase.PLAYING).findFirst();
+    }
+
+    public static Optional<BoardSession> acquireLobbySession(ServerPlayer player, BlockPos pos) {
+        if (player == null || pos == null) return Optional.empty();
+        ServerLevel level = player.level();
+        List<BoardSession> venue = sessionsAt(level, pos);
+        if (venue.isEmpty()) return Optional.empty();
+        UUID matchingBoardId = BoardMatchmakingService.boardForPlayer(player.getUUID()).orElse(null);
+        if (matchingBoardId != null) {
+            BoardSession matching = data(level).get(matchingBoardId);
+            if (matching != null && venue.stream().anyMatch(candidate -> sameVenue(candidate, matching))) return Optional.of(matching);
+        }
+        BoardSession queued = venue.stream().filter(candidate -> candidate.phase() == BoardPhase.READY)
+                .filter(candidate -> BoardMatchmakingService.active(candidate.id())).findFirst().orElse(null);
+        if (queued != null) return Optional.of(queued);
+        BoardSession ready = venue.stream().filter(candidate -> candidate.phase() == BoardPhase.READY).findFirst().orElse(null);
+        if (ready != null) return Optional.of(ready);
+        BoardSession sibling = venue.getFirst().createSibling(UUID.randomUUID());
+        data(level).put(sibling);
+        BoardProtectionService.refreshProtectedAreas(level, data(level));
+        return Optional.of(sibling);
+    }
+
+    public static Optional<BoardSession> findAt(ServerLevel level, BlockPos pos) {
+        return sessionsAt(level, pos).stream().findFirst();
     }
 
     public static Optional<BoardSession> findByController(ServerPlayer player) {
@@ -574,6 +622,8 @@ public class BoardSessionManager {
     }
 
     public static void endGame(ServerLevel level, BoardSession session, boolean keepBoard) {
+        List<ServerPlayer> presentationViewers = BoardSpectatorService.presentationViewers(level, session);
+        boolean keepVenueAnchor = keepBoard && isVenueAnchor(level, session);
         BoardBattleService.cancel(session.id());
         BoardPanelSelectionService.clear(session.id());
         BoardTutorialPolicy.clear(session.id());
@@ -598,13 +648,14 @@ public class BoardSessionManager {
         session.setActionPromptDeadlineTick(0L);
         session.setActionDeadlineTick(0L);
         session.setActionDurationTicks(0);
-        session.setPhase(keepBoard ? BoardPhase.READY : BoardPhase.FINISHED);
-        session.setProtectionEnabled(keepBoard);
-        session.setKeepAfterGame(keepBoard);
+        session.setPhase(keepVenueAnchor ? BoardPhase.READY : BoardPhase.FINISHED);
+        session.setProtectionEnabled(keepVenueAnchor);
+        session.setKeepAfterGame(keepVenueAnchor);
+        for (ServerPlayer viewer : presentationViewers) PacketDistributor.sendToPlayer(viewer, new CloseBoardPresentationPayload(session.id()));
         markChanged(level);
         syncBoardSnapshot(level, session);
         BoardSavedData savedData = data(level);
-        if (!keepBoard) savedData.remove(session.id());
+        if (!keepVenueAnchor) savedData.remove(session.id());
         BoardProtectionService.refreshProtectedAreas(level, savedData);
     }
 
@@ -811,10 +862,6 @@ public class BoardSessionManager {
                     maxHandSize, session.nextArrivalOrder());
             session.putParticipant(initialized);
             session.setHomeNode(initialized.slotUuid(), startNode);
-            BlockPos startPos = session.positions().get(startNode);
-            if (startPos != null && level.getBlockEntity(startPos) instanceof PlatformBlockEntity platform) {
-                platform.setPortrait(initialized.characterId(), initialized.skinId());
-            }
             BoardEntityService.spawnCharacter(level, session, initialized);
             order.add(initialized.slotUuid());
         }
@@ -830,9 +877,11 @@ public class BoardSessionManager {
         session.setActionDurationTicks(0);
         markChanged(level);
         for (ServerPlayer viewer : humanPlayers(level, session)) {
+            BoardSpectatorService.focusParticipant(viewer, session);
             viewer.sendSystemMessage(Component.translatable("message.astral_craft.board.game_started")
                     .withStyle(ChatFormatting.AQUA), true);
         }
+        syncBoardSnapshot(level, session);
 
         BoardHudSyncManager.announce(level, session,
                 Component.translatable("message.astral_craft.board.announcement.round_start", 1), Component.empty(),

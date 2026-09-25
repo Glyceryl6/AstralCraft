@@ -1,5 +1,7 @@
 package com.astral_craft.client.render;
 
+import com.astral_craft.client.gui.board.BoardHudOverlay;
+import com.astral_craft.common.entity.character.AstralCharacterEntity;
 import com.astral_craft.common.entity.SoulLinkEntity;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -42,6 +44,9 @@ public class SoulLinkRenderer extends EntityRenderer<SoulLinkEntity, SoulLinkRen
         Entity first = entity.level().getEntity(entity.firstId());
         Entity second = entity.level().getEntity(entity.secondId());
         state.visible = first instanceof LivingEntity && second instanceof LivingEntity;
+        if (state.visible && first instanceof AstralCharacterEntity character && character.isBoardPawn()) {
+            state.visible = character.boardSessionUuid().map(BoardHudOverlay::isTracking).orElse(false);
+        }
         if (!state.visible) return;
         Vec3 origin = entity.position();
         state.start = this.attachmentPoint(first).subtract(origin);

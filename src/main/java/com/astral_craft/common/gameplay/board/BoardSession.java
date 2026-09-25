@@ -86,6 +86,12 @@ public class BoardSession {
         this.arrivalSequence = Math.max(0, arrivalSequence);
     }
 
+    public BoardSession createSibling(UUID siblingId) {
+        return new BoardSession(siblingId, this.dimension, this.nodes, this.positions, this.protectedArea, this.startNodes,
+                this.mode, this.travelDirection, BoardPhase.READY, List.of(), Map.of(), List.of(), 0, 0, false,
+                true, true, 0, BoardMechanicsState.Snapshot.EMPTY);
+    }
+
     public UUID id() {
         return this.id;
     }

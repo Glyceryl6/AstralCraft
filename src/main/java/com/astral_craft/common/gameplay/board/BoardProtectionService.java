@@ -25,11 +25,14 @@ public class BoardProtectionService {
         Optional<BoardSession> maybeSession = BoardSessionManager.findAt(player.level(), pos);
         if (maybeSession.isEmpty()) return false;
         BoardSession session = maybeSession.get();
-        session.setProtectionEnabled(!session.protectionEnabled());
+        boolean enabled = !BoardSessionManager.venueProtectionEnabled(player.level(), session);
+        for (BoardSession venueSession : BoardSessionManager.venueSessions(player.level(), session)) {
+            venueSession.setProtectionEnabled(enabled);
+            BoardSessionManager.syncBoardSnapshot(player.level(), venueSession);
+        }
         BoardSessionManager.markChanged(player.level());
         refreshProtectedAreas(player.level(), BoardSavedData.get(player.level()));
-        BoardSessionManager.syncBoardSnapshot(player.level(), session);
-        player.sendSystemMessage(Component.translatable(session.protectionEnabled()
+        player.sendSystemMessage(Component.translatable(enabled
                 ? "message.astral_craft.board.protection_enabled"
                 : "message.astral_craft.board.protection_disabled"), true);
         return true;
@@ -52,7 +55,7 @@ public class BoardProtectionService {
 
     public static void refreshProtectedAreas(ServerLevel level, BoardSavedData savedData) {
         List<BoardArea> areas = savedData.sessions().stream().filter(BoardSession::protectionEnabled)
-                .map(BoardSession::protectedArea).toList();
+                .map(BoardSession::protectedArea).distinct().toList();
         if (areas.isEmpty()) ACTIVE_AREAS.remove(level.dimension());
         else ACTIVE_AREAS.put(level.dimension(), areas);
     }

@@ -1391,5 +1391,15 @@
   "gui.astral_craft.exhibition_character.speech_bubble_auto": "Auto",
   "gui.astral_craft.exhibition_character.speech_bubble_reset": "Reset Bubble Layout",
   "gui.astral_craft.creator.error.incompatible_target": "The selected target scope is incompatible with one or more effects. Give item, experience, and hunger effects require player targets.",
-  "gui.astral_craft.creator.appearance.character_skin": "Appearance: Character Skin"
+  "gui.astral_craft.creator.appearance.character_skin": "Appearance: Character Skin",
+  "gui.astral_craft.creator.event.filter.all": "Effects: All",
+  "gui.astral_craft.creator.event.filter.general": "Effects: General",
+  "gui.astral_craft.creator.event.filter.board": "Effects: Board only",
+  "gui.astral_craft.creator.effect.board_coins": "Board: Coins",
+  "gui.astral_craft.creator.effect.board_move_dice": "Board: Extra Dice",
+  "gui.astral_craft.creator.effect.board_set_health": "Board: Set Health",
+  "gui.astral_craft.creator.effect.board_trap": "Board: Place Trap",
+  "gui.astral_craft.creator.arg.trap_type": "Trap Type",
+  "gui.astral_craft.creator.error.value": "Enter a valid value",
+  "message.astral_craft.board.spectator.bound_index": "Watching match %s/%s on this board; use again to cycle, or sneak-use to stop watching"
 }

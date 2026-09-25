@@ -48,12 +48,12 @@ public class BoardDismantlerItem extends Item {
             return InteractionResult.SUCCESS;
         }
 
-        BoardRouteService.broadcastState(session, false, List.of(), List.of(), List.of());
-        BoardSessionManager.resetForLobby(level, session);
-        session.setProtectionEnabled(false);
+        for (BoardSession venueSession : BoardSessionManager.venueSessions(level, session)) {
+            venueSession.setProtectionEnabled(false);
+            BoardSessionManager.syncBoardSnapshot(level, venueSession);
+        }
         BoardSavedData data = BoardSavedData.get(level);
         BoardSessionManager.markChanged(level);
-        BoardSessionManager.syncBoardSnapshot(level, session);
         BoardProtectionService.refreshProtectedAreas(level, data);
         player.sendSystemMessage(Component.translatable("message.astral_craft.board.protection_disabled")
                 .withStyle(ChatFormatting.YELLOW), true);
@@ -71,9 +71,7 @@ public class BoardDismantlerItem extends Item {
         BlockPos center = session.protectedArea().center();
         if (player.distanceToSqr(center.getX() + 0.5D, center.getY() + 0.5D, center.getZ() + 0.5D) > 64.0D * 64.0D) return;
         ServerLevel level = player.level();
-        BoardRouteService.broadcastState(session, false, List.of(), List.of(), List.of());
-        BoardSessionManager.resetForLobby(level, session);
-        session.setProtectionEnabled(false);
+        List<BoardSession> venueSessions = BoardSessionManager.venueSessions(level, session);
         if (action == BoardDismantleConfirmPayload.Action.REMOVE_DATA_AND_PANELS) {
             for (BlockPos pos : session.positions().values()) {
                 if (level.getBlockState(pos).getBlock() instanceof BasePlatform) {
@@ -81,10 +79,8 @@ public class BoardDismantlerItem extends Item {
                 }
             }
         }
-
+        for (BoardSession venueSession : venueSessions) BoardSessionManager.endGame(level, venueSession, false);
         BoardSavedData data = BoardSavedData.get(level);
-        BoardSessionManager.syncBoardSnapshot(level, session);
-        data.remove(session.id());
         BoardProtectionService.refreshProtectedAreas(level, data);
         String messageKey = action == BoardDismantleConfirmPayload.Action.REMOVE_DATA_AND_PANELS
                 ? "message.astral_craft.board.deleted_with_panels"

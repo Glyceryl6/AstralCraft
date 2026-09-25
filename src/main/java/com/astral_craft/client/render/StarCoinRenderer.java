@@ -1,6 +1,7 @@
 package com.astral_craft.client.render;
 
 import com.astral_craft.AstralCraft;
+import com.astral_craft.client.gui.board.BoardHudOverlay;
 import com.astral_craft.client.render.effect.EffectRenderGeometry;
 import com.astral_craft.common.entity.StarCoinEntity;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -33,10 +34,12 @@ public class StarCoinRenderer extends EntityRenderer<StarCoinEntity, StarCoinRen
         state.age = entity.visualAge(partialTick);
         state.amount = entity.amount();
         state.progress = entity.visualProgress(partialTick);
+        state.visible = entity.boardId().map(BoardHudOverlay::isTracking).orElse(false);
     }
 
     @Override
     public void submit(StarCoinRenderState state, PoseStack poseStack, SubmitNodeCollector collector, CameraRenderState cameraState) {
+        if (!state.visible) return;
         int layers = state.kind == StarCoinEntity.Kind.PILE ? Math.clamp(state.amount, 1, 5) : 1;
         float size = state.kind == StarCoinEntity.Kind.PILE
                 ? Math.min(0.24F, 0.20F + Math.max(0, state.amount - 1) * 0.004F) : 0.15F;

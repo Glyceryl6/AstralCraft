@@ -7,12 +7,19 @@ import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.monster.zombie.Zombie;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
+
+import java.util.Optional;
+import java.util.UUID;
 
 /** Zombie-shaped board monster whose facing is controlled entirely by the board route. */
 public class BoardMonsterZombieEntity extends Zombie {
 
     private static final EntityDataAccessor<Integer> DATA_BOARD_DIRECTION = SynchedEntityData.defineId(
             BoardMonsterZombieEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<String> DATA_BOARD_SESSION_ID = SynchedEntityData.defineId(
+            BoardMonsterZombieEntity.class, EntityDataSerializers.STRING);
 
     public BoardMonsterZombieEntity(EntityType<? extends BoardMonsterZombieEntity> type, Level level) {
         super(type, level);
@@ -27,6 +34,7 @@ public class BoardMonsterZombieEntity extends Zombie {
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
         super.defineSynchedData(builder);
         builder.define(DATA_BOARD_DIRECTION, Direction.NORTH.get2DDataValue());
+        builder.define(DATA_BOARD_SESSION_ID, "");
     }
 
     @Override
@@ -60,6 +68,35 @@ public class BoardMonsterZombieEntity extends Zombie {
         if (direction == null || !direction.getAxis().isHorizontal()) return;
         this.entityData.set(DATA_BOARD_DIRECTION, direction.get2DDataValue());
         this.applyBoardRotation(direction);
+    }
+
+    public void setBoardSessionId(UUID boardSessionId) {
+        this.entityData.set(DATA_BOARD_SESSION_ID, boardSessionId == null ? "" : boardSessionId.toString());
+    }
+
+    public Optional<UUID> boardSessionId() {
+        String raw = this.entityData.get(DATA_BOARD_SESSION_ID);
+        if (raw.isBlank()) return Optional.empty();
+        try {
+            return Optional.of(UUID.fromString(raw));
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    protected void readAdditionalSaveData(ValueInput input) {
+        super.readAdditionalSaveData(input);
+        this.entityData.set(DATA_BOARD_DIRECTION, input.getIntOr("board_direction", Direction.NORTH.get2DDataValue()));
+        this.entityData.set(DATA_BOARD_SESSION_ID, input.getStringOr("board_session_id", ""));
+        this.applyBoardRotation(this.boardDirection());
+    }
+
+    @Override
+    protected void addAdditionalSaveData(ValueOutput output) {
+        super.addAdditionalSaveData(output);
+        output.putInt("board_direction", this.entityData.get(DATA_BOARD_DIRECTION));
+        output.putString("board_session_id", this.entityData.get(DATA_BOARD_SESSION_ID));
     }
 
     private void applyBoardRotation(Direction direction) {

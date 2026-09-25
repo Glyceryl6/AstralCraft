@@ -63,6 +63,7 @@ public class AstralDiceRenderer extends EntityRenderer<AstralDiceEntity, AstralD
 
     @Override
     public void submit(AstralDiceRenderState state, PoseStack poseStack, SubmitNodeCollector collector, CameraRenderState cameraState) {
+        if (!state.visible) return;
         if (state.flatNumber) {
             super.submit(state, poseStack, collector, cameraState);
             return;

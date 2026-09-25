@@ -29,6 +29,7 @@ public class BoardMonsterEntityService {
         monster.entityUuid().map(level::getEntity).ifPresent(Entity::discard);
         BoardMonsterZombieEntity entity = AstralEntities.BOARD_MONSTER_ZOMBIE.get().create(level, EntitySpawnReason.TRIGGERED);
         if (entity == null) return;
+        entity.setBoardSessionId(session.id());
         entity.setBoardDirection(BoardRouteService.facingDirection(session, monster));
         entity.setCustomName(Component.translatable("gui.astral_craft.board.monster"));
         entity.setCustomNameVisible(false);
@@ -42,7 +43,10 @@ public class BoardMonsterEntityService {
     public static void sync(ServerLevel level, BoardSession session, BoardParticipant monster) {
         sync(level, monster);
         BoardMonsterZombieEntity entity = entity(level, monster);
-        if (entity != null) entity.setBoardDirection(BoardRouteService.facingDirection(session, monster));
+        if (entity != null) {
+            entity.setBoardSessionId(session.id());
+            entity.setBoardDirection(BoardRouteService.facingDirection(session, monster));
+        }
     }
 
     public static void sync(ServerLevel level, BoardParticipant monster) {

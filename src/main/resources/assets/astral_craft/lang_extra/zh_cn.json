@@ -1391,5 +1391,15 @@
   "gui.astral_craft.exhibition_character.speech_bubble_auto": "自动",
   "gui.astral_craft.exhibition_character.speech_bubble_reset": "重置气泡布局",
   "gui.astral_craft.creator.error.incompatible_target": "当前目标范围与所选效果不兼容。发放物品、经验和饱食度仅支持玩家目标。",
-  "gui.astral_craft.creator.appearance.character_skin": "外观类型：角色皮肤"
+  "gui.astral_craft.creator.appearance.character_skin": "外观类型：角色皮肤",
+  "gui.astral_craft.creator.event.filter.all": "效果：全部",
+  "gui.astral_craft.creator.event.filter.general": "效果：通用",
+  "gui.astral_craft.creator.event.filter.board": "效果：仅棋盘",
+  "gui.astral_craft.creator.effect.board_coins": "棋盘：星币",
+  "gui.astral_craft.creator.effect.board_move_dice": "棋盘：额外骰子",
+  "gui.astral_craft.creator.effect.board_set_health": "棋盘：设置生命",
+  "gui.astral_craft.creator.effect.board_trap": "棋盘：放置陷阱",
+  "gui.astral_craft.creator.arg.trap_type": "陷阱类型",
+  "gui.astral_craft.creator.error.value": "请输入有效值",
+  "message.astral_craft.board.spectator.bound_index": "正在观战该棋盘的第 %s/%s 局；再次使用可切换，潜行使用可退出观战"
 }

@@ -1,6 +1,7 @@
 package com.astral_craft.client.render.character;
 
 import com.astral_craft.client.gameplay.character.ClientCharacterDefinitionCache;
+import com.astral_craft.client.gui.board.BoardHudOverlay;
 import com.astral_craft.client.model.character.AstralCharacterAnimationRegistry;
 import com.astral_craft.client.model.character.AstralGeoAnimationManager;
 import com.astral_craft.common.entity.character.AstralCharacterEntity;
@@ -65,6 +66,9 @@ public class AstralCharacterRenderer<T extends AstralCharacterEntity> extends Mo
 
         if (entity.hasEffect(AstralStatusEffects.SHADOW_CLOAK) || entity.hasEffect(AstralStatusEffects.ASTRAL_PHASE)) {
             state.isInvisibleToPlayer = false;
+        }
+        if (entity.isBoardPawn()) {
+            state.isInvisibleToPlayer = entity.boardSessionUuid().map(boardId -> !BoardHudOverlay.isTracking(boardId)).orElse(true);
         }
     }
 

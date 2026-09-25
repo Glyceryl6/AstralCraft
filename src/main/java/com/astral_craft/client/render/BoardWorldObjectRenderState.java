@@ -12,5 +12,6 @@ public class BoardWorldObjectRenderState extends EntityRenderState {
     public int stackIndex;
     public int stackCount = 1;
     public int amount = 1;
+    public boolean visible = true;
 
 }

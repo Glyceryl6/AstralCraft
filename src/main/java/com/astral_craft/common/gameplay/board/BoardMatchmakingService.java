@@ -202,6 +202,11 @@ public class BoardMatchmakingService {
         }
     }
 
+    public static Optional<UUID> boardForPlayer(UUID playerId) {
+        MatchState state = findPlayerMatch(playerId);
+        return state == null ? Optional.empty() : Optional.of(state.boardId);
+    }
+
     public static boolean active(UUID boardId) {
         return MATCHES.containsKey(boardId);
     }

@@ -64,6 +64,9 @@ public class AstralDataEditorScreen extends Screen {
     private TargetScope eventTarget = TargetScope.TRIGGER_PLAYER;
     private boolean eventTriggers = true;
     private boolean eventBroadcast;
+    private EventEffectFilter eventEffectFilter = EventEffectFilter.ALL;
+    private int eventScrollOffset;
+    private boolean eventScrollbarDragging;
     private final ConditionDraft[] eventConditions = {new ConditionDraft(), new ConditionDraft()};
     private final EffectDraft[] eventEffects = {new EffectDraft(), new EffectDraft(), new EffectDraft()};
 
@@ -204,14 +207,19 @@ public class AstralDataEditorScreen extends Screen {
         int columnW = (layout.contentW() - GAP) / 2;
         graphics.text(this.font, Component.translatable("gui.astral_craft.creator.event.conditions"), layout.contentX(), slotsY - 11, 0xFFD7E4F2);
         graphics.text(this.font, Component.translatable("gui.astral_craft.creator.event.effects"), layout.contentX() + columnW + GAP, slotsY - 11, 0xFFD7E4F2);
+        int viewportBottom = layout.eventViewportBottom();
+        graphics.enableScissor(layout.contentX(), slotsY, layout.contentX() + layout.contentW(), viewportBottom);
         for (int index = 0; index < this.eventConditions.length; index++) this.renderConditionSlot(graphics, layout, index, mouseX, mouseY);
         for (int index = 0; index < this.eventEffects.length; index++) this.renderEffectSlot(graphics, layout, index, mouseX, mouseY);
+        graphics.disableScissor();
+        this.renderButton(graphics, layout.effectFilterX(), slotsY - 16, layout.effectFilterW(), 14, this.eventEffectFilter.translationKey, mouseX, mouseY, 0xFF5664B7, false);
+        this.renderEventScrollbar(graphics, layout);
     }
 
     private void renderConditionSlot(GuiGraphicsExtractor graphics, EditorLayout layout, int index, int mouseX, int mouseY) {
         ConditionDraft draft = this.eventConditions[index];
         int x = layout.conditionX();
-        int y = layout.slotY(index);
+        int y = layout.slotY(index) - this.eventScrollOffset;
         this.renderButton(graphics, x, y, layout.slotTypeW(), BUTTON_HEIGHT, draft.type.translationKey, mouseX, mouseY, 0xFF6B5AA7, false);
         draft.renderLabels(graphics, this, x, y + BUTTON_HEIGHT + 1, layout.slotArgW());
     }
@@ -219,7 +227,7 @@ public class AstralDataEditorScreen extends Screen {
     private void renderEffectSlot(GuiGraphicsExtractor graphics, EditorLayout layout, int index, int mouseX, int mouseY) {
         EffectDraft draft = this.eventEffects[index];
         int x = layout.effectX();
-        int y = layout.slotY(index);
+        int y = layout.slotY(index) - this.eventScrollOffset;
         this.renderButton(graphics, x, y, layout.slotTypeW(), BUTTON_HEIGHT, draft.type.translationKey, mouseX, mouseY, 0xFFB05282, false);
         draft.renderLabels(graphics, this, x, y + BUTTON_HEIGHT + 1, layout.slotArgW());
     }
@@ -299,6 +307,7 @@ public class AstralDataEditorScreen extends Screen {
                 return true;
             }
         }
+        if (this.tab == EditorTab.EVENT && this.handleEventScrollbarClick(layout, mouseX, mouseY)) return true;
         if (this.isInside(mouseX, mouseY, layout.choosePathX(), layout.packBoxY(), layout.choosePathW(), FIELD_HEIGHT)) {
             this.openExportFolderBrowser();
             return true;
@@ -330,15 +339,19 @@ public class AstralDataEditorScreen extends Screen {
                 return true;
             }
             for (int index = 0; index < this.eventConditions.length; index++) {
-                if (this.isInside(mouseX, mouseY, layout.conditionX(), layout.slotY(index), layout.slotTypeW(), BUTTON_HEIGHT)) {
+                if (this.isInside(mouseX, mouseY, layout.conditionX(), layout.slotY(index) - this.eventScrollOffset, layout.slotTypeW(), BUTTON_HEIGHT)) {
                     this.eventConditions[index].nextType();
                     this.updateWidgets(layout);
                     return true;
                 }
             }
+            if (this.isInside(mouseX, mouseY, layout.effectFilterX(), layout.eventSlotsY() - 16, layout.effectFilterW(), 14)) {
+                this.eventEffectFilter = this.eventEffectFilter.next();
+                return true;
+            }
             for (int index = 0; index < this.eventEffects.length; index++) {
-                if (this.isInside(mouseX, mouseY, layout.effectX(), layout.slotY(index), layout.slotTypeW(), BUTTON_HEIGHT)) {
-                    this.eventEffects[index].nextType();
+                if (this.isInside(mouseX, mouseY, layout.effectX(), layout.slotY(index) - this.eventScrollOffset, layout.slotTypeW(), BUTTON_HEIGHT)) {
+                    this.eventEffects[index].nextType(this.eventEffectFilter);
                     this.updateWidgets(layout);
                     return true;
                 }
@@ -359,6 +372,77 @@ public class AstralDataEditorScreen extends Screen {
             }
         }
         return false;
+    }
+
+    @Override
+    public boolean mouseDragged(@NonNull MouseButtonEvent event, double dragX, double dragY) {
+        if (event.button() == 0 && this.eventScrollbarDragging && this.tab == EditorTab.EVENT) {
+            this.updateEventScrollFromMouse(this.layout(), event.y());
+            return true;
+        }
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        if (event.button() == 0 && this.eventScrollbarDragging) {
+            this.eventScrollbarDragging = false;
+            return true;
+        }
+        return super.mouseReleased(event);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double deltaX, double deltaY) {
+        EditorLayout layout = this.layout();
+        if (this.tab == EditorTab.EVENT && this.isInside(mouseX, mouseY, layout.contentX(), layout.eventSlotsY(), layout.contentW(), layout.eventViewportH())) {
+            int max = this.maxEventScroll(layout);
+            this.eventScrollOffset = Math.clamp(this.eventScrollOffset - (int) Math.signum(deltaY) * 24, 0, max);
+            this.updateWidgets(layout);
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, deltaX, deltaY);
+    }
+
+    private boolean handleEventScrollbarClick(EditorLayout layout, double mouseX, double mouseY) {
+        int max = this.maxEventScroll(layout);
+        if (max <= 0) return false;
+        int x = layout.contentX() + layout.contentW() - 6;
+        if (!this.isInside(mouseX, mouseY, x, layout.eventSlotsY(), 6, layout.eventViewportH())) return false;
+        this.eventScrollbarDragging = true;
+        this.updateEventScrollFromMouse(layout, mouseY);
+        return true;
+    }
+
+    private void updateEventScrollFromMouse(EditorLayout layout, double mouseY) {
+        int max = this.maxEventScroll(layout);
+        if (max <= 0) {
+            this.eventScrollOffset = 0;
+            return;
+        }
+        int height = layout.eventViewportH();
+        int thumb = Math.max(16, height * height / (height + max));
+        double track = Math.max(1.0D, height - thumb);
+        double progress = Math.clamp((mouseY - layout.eventSlotsY() - thumb * 0.5D) / track, 0.0D, 1.0D);
+        this.eventScrollOffset = Math.clamp((int) Math.round(progress * max), 0, max);
+        this.updateWidgets(layout);
+    }
+
+    private int maxEventScroll(EditorLayout layout) {
+        int contentBottom = layout.slotY(Math.max(this.eventConditions.length, this.eventEffects.length) - 1) + SLOT_HEIGHT;
+        return Math.max(0, contentBottom - layout.eventViewportBottom());
+    }
+
+    private void renderEventScrollbar(GuiGraphicsExtractor graphics, EditorLayout layout) {
+        int max = this.maxEventScroll(layout);
+        if (max <= 0) return;
+        int x = layout.contentX() + layout.contentW() - 5;
+        int top = layout.eventSlotsY();
+        int height = layout.eventViewportH();
+        graphics.fill(x, top, x + 4, top + height, 0x554F5668);
+        int thumb = Math.max(16, height * height / (height + max));
+        int y = top + (height - thumb) * this.eventScrollOffset / max;
+        graphics.fill(x, y, x + 4, y + thumb, 0xFFE83CA8);
     }
 
     @Override
@@ -712,8 +796,8 @@ public class AstralDataEditorScreen extends Screen {
         this.position(this.eventCooldownBox, layout.eventSmallX(0), layout.rowBoxY(2), layout.eventSmallW(), event);
         this.position(this.eventChanceBox, layout.eventSmallX(1), layout.rowBoxY(2), layout.eventSmallW(), event);
         this.position(this.eventRadiusBox, layout.eventSmallX(2), layout.rowBoxY(2), layout.eventSmallW(), event);
-        for (int index = 0; index < this.eventConditions.length; index++) this.eventConditions[index].position(layout.conditionX(), layout.slotY(index) + BUTTON_HEIGHT + 13, layout.slotArgW(), event);
-        for (int index = 0; index < this.eventEffects.length; index++) this.eventEffects[index].position(layout.effectX(), layout.slotY(index) + BUTTON_HEIGHT + 13, layout.slotArgW(), event);
+        for (int index = 0; index < this.eventConditions.length; index++) this.eventConditions[index].position(layout.conditionX(), layout.slotY(index) - this.eventScrollOffset + BUTTON_HEIGHT + 13, layout.slotArgW(), event);
+        for (int index = 0; index < this.eventEffects.length; index++) this.eventEffects[index].position(layout.effectX(), layout.slotY(index) - this.eventScrollOffset + BUTTON_HEIGHT + 13, layout.slotArgW(), event);
 
         boolean skin = this.tab == EditorTab.CHARACTER_SKIN;
         this.position(this.skinEntryIdBox, layout.leftX(), layout.rowBoxY(0), layout.halfW(), skin);
@@ -758,8 +842,8 @@ public class AstralDataEditorScreen extends Screen {
                 || this.isInside(mouseX, mouseY, layout.closeX(), layout.actionY(), layout.actionButtonW(), 22)) return true;
         if (this.tab == EditorTab.EVENT) {
             for (int index = 3; index < 6; index++) if (this.isInside(mouseX, mouseY, layout.eventSmallX(index), layout.rowBoxY(2), layout.eventSmallW(), FIELD_HEIGHT)) return true;
-            for (int index = 0; index < this.eventConditions.length; index++) if (this.isInside(mouseX, mouseY, layout.conditionX(), layout.slotY(index), layout.slotTypeW(), BUTTON_HEIGHT)) return true;
-            for (int index = 0; index < this.eventEffects.length; index++) if (this.isInside(mouseX, mouseY, layout.effectX(), layout.slotY(index), layout.slotTypeW(), BUTTON_HEIGHT)) return true;
+            for (int index = 0; index < this.eventConditions.length; index++) if (this.isInside(mouseX, mouseY, layout.conditionX(), layout.slotY(index) - this.eventScrollOffset, layout.slotTypeW(), BUTTON_HEIGHT)) return true;
+            for (int index = 0; index < this.eventEffects.length; index++) if (this.isInside(mouseX, mouseY, layout.effectX(), layout.slotY(index) - this.eventScrollOffset, layout.slotTypeW(), BUTTON_HEIGHT)) return true;
         } else if (this.tab == EditorTab.CHARACTER_SKIN) {
             return this.isInside(mouseX, mouseY, layout.leftX(), layout.rowBoxY(3), layout.halfW(), FIELD_HEIGHT);
         } else if (this.tab == EditorTab.APPEARANCE) {
@@ -800,6 +884,25 @@ public class AstralDataEditorScreen extends Screen {
         JsonObject result = new JsonObject();
         result.addProperty("type", type.toString());
         return result;
+    }
+
+    private enum EventEffectFilter {
+        ALL("gui.astral_craft.creator.event.filter.all"),
+        GENERAL("gui.astral_craft.creator.event.filter.general"),
+        BOARD("gui.astral_craft.creator.event.filter.board");
+
+        private final String translationKey;
+
+        EventEffectFilter(String translationKey) { this.translationKey = translationKey; }
+
+        private EventEffectFilter next() {
+            EventEffectFilter[] values = values();
+            return values[(this.ordinal() + 1) % values.length];
+        }
+
+        private boolean accepts(EffectType type) {
+            return this == ALL || (this == BOARD) == type.boardOnly();
+        }
     }
 
     private enum TargetScope {
@@ -993,6 +1096,30 @@ public class AstralDataEditorScreen extends Screen {
             result.addProperty("effect", screen.requireIdentifier(a, "gui.astral_craft.creator.error.identifier").toString());
             result.addProperty("all", screen.requireBoolean(b, "gui.astral_craft.creator.error.boolean"));
             return result;
+        }),
+        BOARD_COINS("gui.astral_craft.creator.effect.board_coins", "gui.astral_craft.creator.arg.amount", "", "",
+                new DraftDefaults("5", "", ""), target -> true, (screen, a, b, c) -> {
+            JsonObject result = typed(AstralCraft.prefix("board_coins"));
+            result.addProperty("amount", screen.requireInt(a, Integer.MIN_VALUE, Integer.MAX_VALUE, "gui.astral_craft.creator.error.number"));
+            return result;
+        }),
+        BOARD_MOVE_DICE("gui.astral_craft.creator.effect.board_move_dice", "gui.astral_craft.creator.arg.count", "", "",
+                new DraftDefaults("1", "", ""), target -> true, (screen, a, b, c) -> {
+            JsonObject result = typed(AstralCraft.prefix("board_move_dice"));
+            result.addProperty("extra_dice", screen.requireInt(a, 0, 64, "gui.astral_craft.creator.error.number"));
+            return result;
+        }),
+        BOARD_SET_HEALTH("gui.astral_craft.creator.effect.board_set_health", "gui.astral_craft.creator.arg.amount", "", "",
+                new DraftDefaults("1", "", ""), target -> true, (screen, a, b, c) -> {
+            JsonObject result = typed(AstralCraft.prefix("board_set_health"));
+            result.addProperty("health", screen.requireInt(a, 0, Integer.MAX_VALUE, "gui.astral_craft.creator.error.number"));
+            return result;
+        }),
+        BOARD_TRAP("gui.astral_craft.creator.effect.board_trap", "gui.astral_craft.creator.arg.trap_type", "", "",
+                new DraftDefaults("demolition", "", ""), target -> true, (screen, a, b, c) -> {
+            JsonObject result = typed(AstralCraft.prefix("board_trap"));
+            result.addProperty("trap_type", screen.requireText(a, "gui.astral_craft.creator.error.value").toLowerCase(Locale.ROOT));
+            return result;
         });
 
         private final String translationKey;
@@ -1014,9 +1141,15 @@ public class AstralDataEditorScreen extends Screen {
             this.encoder = encoder;
         }
 
-        private EffectType next() {
+        private EffectType next(EventEffectFilter filter) {
             EffectType[] values = values();
-            return values[(this.ordinal() + 1) % values.length];
+            EffectType candidate = this;
+            do candidate = values[(candidate.ordinal() + 1) % values.length]; while (!filter.accepts(candidate));
+            return candidate;
+        }
+
+        private boolean boardOnly() {
+            return this.name().startsWith("BOARD_");
         }
 
         private boolean compatibleWith(TargetScope target) {
@@ -1129,8 +1262,8 @@ public class AstralDataEditorScreen extends Screen {
             this.set(first, second, third);
         }
 
-        private void nextType() {
-            this.type = this.type.next();
+        private void nextType(EventEffectFilter filter) {
+            this.type = this.type.next(filter);
             this.resetDefaults();
         }
 
@@ -1213,6 +1346,10 @@ public class AstralDataEditorScreen extends Screen {
         private int slotTypeW() { return (this.contentW() - GAP) / 2; }
         private int slotArgW() { return this.slotTypeW(); }
         private int slotY(int index) { return this.eventSlotsY() + index * SLOT_HEIGHT; }
+        private int eventViewportBottom() { return this.statusY() - 4; }
+        private int eventViewportH() { return Math.max(24, this.eventViewportBottom() - this.eventSlotsY()); }
+        private int effectFilterW() { return Math.min(120, this.slotTypeW()); }
+        private int effectFilterX() { return this.effectX() + this.slotTypeW() - this.effectFilterW(); }
         private int rarityColorW() { return Math.max(72, (this.contentW() - GAP * 2) / 3); }
         private int rarityColorX(int index) { return this.contentX() + index * (this.rarityColorW() + GAP); }
         private int actionY() { return this.panelY + this.panelH - 31; }

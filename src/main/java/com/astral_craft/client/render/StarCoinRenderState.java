@@ -9,4 +9,5 @@ public class StarCoinRenderState extends EntityRenderState {
     public float age;
     public int amount = 1;
     public float progress;
+    public boolean visible = true;
 }

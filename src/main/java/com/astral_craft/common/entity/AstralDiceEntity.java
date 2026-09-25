@@ -17,16 +17,14 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
-import org.jspecify.annotations.Nullable;
-
 import java.util.Optional;
 import java.util.UUID;
 
 public class AstralDiceEntity extends Entity {
 
     public static final int RESULT_HOLD_TICKS = 12;
-    private @Nullable UUID boardSessionId;
 
+    private static final EntityDataAccessor<String> DATA_BOARD_SESSION_ID = SynchedEntityData.defineId(AstralDiceEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<Integer> DATA_MIN = SynchedEntityData.defineId(AstralDiceEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> DATA_MAX = SynchedEntityData.defineId(AstralDiceEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> DATA_RESULT = SynchedEntityData.defineId(AstralDiceEntity.class, EntityDataSerializers.INT);
@@ -52,6 +50,7 @@ public class AstralDiceEntity extends Entity {
 
     @Override
     protected void defineSynchedData(SynchedEntityData.Builder builder) {
+        builder.define(DATA_BOARD_SESSION_ID, "");
         builder.define(DATA_MIN, 1);
         builder.define(DATA_MAX, 6);
         builder.define(DATA_RESULT, 1);
@@ -136,11 +135,17 @@ public class AstralDiceEntity extends Entity {
     }
 
     public void setBoardSessionId(UUID boardSessionId) {
-        this.boardSessionId = boardSessionId;
+        this.entityData.set(DATA_BOARD_SESSION_ID, boardSessionId == null ? "" : boardSessionId.toString());
     }
 
     public Optional<UUID> boardSessionId() {
-        return Optional.ofNullable(this.boardSessionId);
+        String raw = this.entityData.get(DATA_BOARD_SESSION_ID);
+        if (raw.isBlank()) return Optional.empty();
+        try {
+            return Optional.of(UUID.fromString(raw));
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
     }
 
     public int rollTicks() {
@@ -240,12 +245,7 @@ public class AstralDiceEntity extends Entity {
         this.entityData.set(DATA_FLAT_NUMBER, input.getBooleanOr("flat_number", false));
         this.setCustomNameVisible(this.flatNumber());
         this.entityData.set(DATA_TEXTURE, input.getStringOr("texture", DiceSkinPreferenceManager.DEFAULT_TEXTURE.toString()));
-        String boardId = input.getStringOr("board_session_id", "");
-        try {
-            this.boardSessionId = boardId.isBlank() ? null : UUID.fromString(boardId);
-        } catch (IllegalArgumentException ignored) {
-            this.boardSessionId = null;
-        }
+        this.entityData.set(DATA_BOARD_SESSION_ID, input.getStringOr("board_session_id", ""));
         this.tickCount = Math.max(0, input.getIntOr("age", 0));
     }
 
@@ -263,7 +263,7 @@ public class AstralDiceEntity extends Entity {
         output.putBoolean("primary", this.isPrimary());
         output.putBoolean("flat_number", this.flatNumber());
         output.putString("texture", this.texture().toString());
-        output.putString("board_session_id", this.boardSessionId == null ? "" : this.boardSessionId.toString());
+        output.putString("board_session_id", this.entityData.get(DATA_BOARD_SESSION_ID));
         output.putInt("age", this.tickCount);
     }
 

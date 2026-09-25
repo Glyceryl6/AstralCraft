@@ -1,5 +1,6 @@
 package com.astral_craft.client.render;
 
+import com.astral_craft.client.gui.board.BoardHudOverlay;
 import com.astral_craft.client.render.effect.EffectRenderGeometry;
 import com.astral_craft.common.entity.BoardWorldObjectEntity;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -38,6 +39,7 @@ public class BoardWorldObjectRenderer extends EntityRenderer<BoardWorldObjectEnt
         state.stackIndex = entity.stackIndex();
         state.stackCount = entity.stackCount();
         state.amount = entity.amount();
+        state.visible = entity.boardId().map(BoardHudOverlay::isTracking).orElse(false);
         BlockPos pos = BlockPos.containing(entity.getX(), entity.getBoundingBox().maxY, entity.getZ());
         state.movingBlockRenderState.randomSeedPos = entity.blockPosition();
         state.movingBlockRenderState.blockPos = pos;
@@ -52,6 +54,7 @@ public class BoardWorldObjectRenderer extends EntityRenderer<BoardWorldObjectEnt
     @Override
     public void submit(BoardWorldObjectRenderState state, PoseStack poseStack,
                        SubmitNodeCollector collector, CameraRenderState cameraState) {
+        if (!state.visible) return;
         if (state.kind == BoardWorldObjectEntity.Kind.COIN_PILE) {
             this.submitCoinPile(state, poseStack, collector);
         } else if (state.kind.coin()) {
