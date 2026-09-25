@@ -37,6 +37,10 @@ public class ExhibitionCharacterConfigScreen extends Screen {
     private static final int SKIN_CARD_H = 46;
     private static final int TEXT_LINE_H = 10;
     private static final int GAP = 4;
+    private static final int SPEECH_BUBBLE_EDITOR_HEIGHT = 126;
+    private static final float SPEECH_BUBBLE_PREVIEW_SCALE = 0.45F;
+    private static final float SPEECH_BUBBLE_OFFSET_PREVIEW_SCALE = 0.18F;
+    private static final float AUTO_SPEECH_BUBBLE_WIDTH = 160.0F;
     private final int entityId;
     private final List<CharacterDefinition> characters;
     private final Identifier initialCharacterId;
@@ -51,6 +55,10 @@ public class ExhibitionCharacterConfigScreen extends Screen {
     private final String initialSpeechText;
     private final String initialSpeechImage;
     private final boolean initialFaceLookingPlayer;
+    private final float initialSpeechBubbleOffsetX;
+    private final float initialSpeechBubbleOffsetY;
+    private final float initialSpeechBubbleWidth;
+    private final float initialSpeechBubbleScale;
     private final boolean initialCustomSkinEnabled;
     private final boolean initialCustomSkinPlayer;
     private final String initialCustomSkinSource;
@@ -66,6 +74,10 @@ public class ExhibitionCharacterConfigScreen extends Screen {
     private String speechText;
     private String speechImage;
     private boolean faceLookingPlayer;
+    private float speechBubbleOffsetX;
+    private float speechBubbleOffsetY;
+    private float speechBubbleWidth;
+    private float speechBubbleScale;
     private boolean customSkinEnabled;
     private boolean customSkinPlayer;
     private String customSkinSource;
@@ -76,6 +88,15 @@ public class ExhibitionCharacterConfigScreen extends Screen {
     private boolean draggingSkinScrollbar;
     private boolean draggingWorldRotation;
     private boolean draggingWorldPosition;
+    private boolean speechBubbleSelected;
+    private SpeechBubbleDrag speechBubbleDrag = SpeechBubbleDrag.NONE;
+    private double speechBubbleDragStartMouseX;
+    private double speechBubbleDragStartMouseY;
+    private float speechBubbleDragStartOffsetX;
+    private float speechBubbleDragStartOffsetY;
+    private float speechBubbleDragStartWidth;
+    private float speechBubbleDragStartScale;
+    private int speechBubbleResizeDirection;
     private double lastDragX;
     private double positionDragStartMouseX;
     private double positionDragStartMouseY;
@@ -113,6 +134,10 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         this.initialSpeechText = payload.speechText();
         this.initialSpeechImage = payload.speechImage();
         this.initialFaceLookingPlayer = payload.faceLookingPlayer();
+        this.initialSpeechBubbleOffsetX = payload.speechBubbleOffsetX();
+        this.initialSpeechBubbleOffsetY = payload.speechBubbleOffsetY();
+        this.initialSpeechBubbleWidth = payload.speechBubbleWidth();
+        this.initialSpeechBubbleScale = payload.speechBubbleScale();
         this.initialCustomSkinEnabled = payload.customSkinEnabled();
         this.initialCustomSkinPlayer = payload.customSkinPlayer();
         this.initialCustomSkinSource = payload.customSkinSource();
@@ -128,6 +153,10 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         this.speechText = this.initialSpeechText;
         this.speechImage = this.initialSpeechImage;
         this.faceLookingPlayer = this.initialFaceLookingPlayer;
+        this.speechBubbleOffsetX = this.initialSpeechBubbleOffsetX;
+        this.speechBubbleOffsetY = this.initialSpeechBubbleOffsetY;
+        this.speechBubbleWidth = this.initialSpeechBubbleWidth;
+        this.speechBubbleScale = this.initialSpeechBubbleScale;
         this.customSkinEnabled = this.initialCustomSkinEnabled;
         this.customSkinPlayer = this.initialCustomSkinPlayer;
         this.customSkinSource = this.initialCustomSkinSource;
@@ -245,7 +274,14 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         if (this.tab == ConfigTab.CHARACTER) this.renderSkinPanel(graphics, layout, mouseX, mouseY);
         this.renderWorldPreviewHint(graphics, layout);
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        if (this.hoveredEditBox(layout, mouseX, mouseY)) graphics.requestCursor(CursorTypes.IBEAM);
+        SpeechBubbleHit speechBubbleHit = this.speechBubbleHit(layout, mouseX, mouseY);
+        if (this.speechBubbleDrag == SpeechBubbleDrag.RESIZE_WIDTH || speechBubbleHit == SpeechBubbleHit.WIDTH_LEFT || speechBubbleHit == SpeechBubbleHit.WIDTH_RIGHT) {
+            graphics.requestCursor(CursorTypes.RESIZE_EW);
+        } else if (this.speechBubbleDrag == SpeechBubbleDrag.RESIZE_SCALE || speechBubbleHit == SpeechBubbleHit.SCALE_TOP || speechBubbleHit == SpeechBubbleHit.SCALE_BOTTOM) {
+            graphics.requestCursor(CursorTypes.RESIZE_NS);
+        } else if (this.speechBubbleDrag == SpeechBubbleDrag.MOVE || speechBubbleHit == SpeechBubbleHit.BODY) {
+            graphics.requestCursor(CursorTypes.RESIZE_ALL);
+        } else if (this.hoveredEditBox(layout, mouseX, mouseY)) graphics.requestCursor(CursorTypes.IBEAM);
         else if (this.hoveredManualControl(layout, mouseX, mouseY)) graphics.requestCursor(CursorTypes.POINTING_HAND);
         else graphics.requestCursor(CursorTypes.ARROW);
     }
@@ -306,6 +342,10 @@ public class ExhibitionCharacterConfigScreen extends Screen {
             this.updateSkinScrollFromMouse(layout, event.y());
             return true;
         }
+        if (this.speechBubbleDrag != SpeechBubbleDrag.NONE) {
+            this.dragSpeechBubble(event.x(), event.y());
+            return true;
+        }
         if (this.draggingWorldRotation) {
             float delta = (float) (event.x() - this.lastDragX);
             this.lastDragX = event.x();
@@ -323,6 +363,10 @@ public class ExhibitionCharacterConfigScreen extends Screen {
 
     @Override
     public boolean mouseReleased(@NonNull MouseButtonEvent event) {
+        if (event.button() == 0 && this.speechBubbleDrag != SpeechBubbleDrag.NONE) {
+            this.speechBubbleDrag = SpeechBubbleDrag.NONE;
+            return true;
+        }
         if (event.button() == 0 && this.draggingContentScrollbar) {
             this.draggingContentScrollbar = false;
             return true;
@@ -521,6 +565,42 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         graphics.text(this.font, Component.translatable("gui.astral_craft.exhibition_character.speech"), layout.contentX(), layout.displaySpeechLabelY(this.contentScroll), 0xFFD7E4F2);
         graphics.text(this.font, Component.translatable("gui.astral_craft.exhibition_character.speech_image"), layout.contentX(),
                 layout.displaySpeechImageLabelY(this.contentScroll), 0xFFD7E4F2);
+        this.renderSpeechBubbleEditor(graphics, layout, mouseX, mouseY);
+    }
+
+    private void renderSpeechBubbleEditor(GuiGraphicsExtractor graphics, Layout layout, int mouseX, int mouseY) {
+        int editorY = layout.displaySpeechBubbleEditorY(this.contentScroll);
+        graphics.text(this.font, Component.translatable("gui.astral_craft.exhibition_character.speech_bubble_layout"), layout.contentX(),
+                layout.displaySpeechBubbleLabelY(this.contentScroll), 0xFFD7E4F2);
+        AstralFancyButton.renderOutlinedBox(graphics, layout.contentX(), editorY, layout.contentW(), SPEECH_BUBBLE_EDITOR_HEIGHT,
+                0x7910121B, 0xB8545B70, 0x60101018, 1, 1);
+        int centerX = layout.contentX() + layout.contentW() / 2;
+        int centerY = editorY + SPEECH_BUBBLE_EDITOR_HEIGHT / 2;
+        graphics.fill(centerX, editorY + 5, centerX + 1, editorY + SPEECH_BUBBLE_EDITOR_HEIGHT - 5, 0x363F5268);
+        graphics.fill(layout.contentX() + 5, centerY, layout.contentRight() - 5, centerY + 1, 0x363F5268);
+        SpeechBubbleBounds bubble = this.speechBubbleBounds(layout);
+        SpeechBubbleHit hit = this.speechBubbleHit(layout, mouseX, mouseY);
+        int border = this.speechBubbleSelected || hit != SpeechBubbleHit.NONE ? 0xFFF45BB9 : 0xFFD7E4F2;
+        AstralFancyButton.renderOutlinedBox(graphics, bubble.x(), bubble.y(), bubble.width(), bubble.height(),
+                0xE8FFF9FF, border, 0xCC3A3040, 1, 1);
+        int handle = 4;
+        graphics.fill(bubble.x() - handle / 2, bubble.y() + bubble.height() / 2 - handle, bubble.x() + handle / 2 + 1,
+                bubble.y() + bubble.height() / 2 + handle, border);
+        graphics.fill(bubble.right() - handle / 2, bubble.y() + bubble.height() / 2 - handle, bubble.right() + handle / 2 + 1,
+                bubble.y() + bubble.height() / 2 + handle, border);
+        graphics.fill(bubble.x() + bubble.width() / 2 - handle, bubble.y() - handle / 2, bubble.x() + bubble.width() / 2 + handle,
+                bubble.y() + handle / 2 + 1, border);
+        graphics.fill(bubble.x() + bubble.width() / 2 - handle, bubble.bottom() - handle / 2, bubble.x() + bubble.width() / 2 + handle,
+                bubble.bottom() + handle / 2 + 1, border);
+        String sizeText = Component.translatable("gui.astral_craft.exhibition_character.speech_bubble_values",
+                this.speechBubbleWidth <= 0.0F ? Component.translatable("gui.astral_craft.exhibition_character.speech_bubble_auto") : Component.literal(this.format(this.speechBubbleWidth)),
+                Component.literal(this.format(this.speechBubbleScale)), Component.literal(this.format(this.speechBubbleOffsetX)), Component.literal(this.format(this.speechBubbleOffsetY))).getString();
+        graphics.text(this.font, this.font.plainSubstrByWidth(sizeText, Math.max(1, layout.contentW() - 8)),
+                layout.contentX() + 4, editorY + 4, 0xFFB9C5D7);
+        int resetY = layout.displaySpeechBubbleResetY(this.contentScroll);
+        boolean resetHover = this.isInside(mouseX, mouseY, layout.contentX(), resetY, layout.contentW(), 20);
+        AstralFancyButton.renderButton(graphics, this.font, Component.translatable("gui.astral_craft.exhibition_character.speech_bubble_reset"),
+                layout.contentX(), resetY, layout.contentW(), 20, false, resetHover, AstralFancyButton.ButtonStyle.button(0xFF646477));
     }
 
     private void renderActions(GuiGraphicsExtractor graphics, Layout layout, int mouseX, int mouseY) {
@@ -650,6 +730,18 @@ public class ExhibitionCharacterConfigScreen extends Screen {
             this.applyLivePreview();
             return true;
         }
+        int resetY = layout.displaySpeechBubbleResetY(this.contentScroll);
+        if (this.isInside(mouseX, mouseY, layout.contentX(), resetY, layout.contentW(), 20)) {
+            this.resetSpeechBubbleLayout();
+            return true;
+        }
+        int editorY = layout.displaySpeechBubbleEditorY(this.contentScroll);
+        if (this.isInside(mouseX, mouseY, layout.contentX(), editorY, layout.contentW(), SPEECH_BUBBLE_EDITOR_HEIGHT)) {
+            SpeechBubbleHit hit = this.speechBubbleHit(layout, mouseX, mouseY);
+            this.beginSpeechBubbleDrag(mouseX, mouseY, hit);
+            if (hit == SpeechBubbleHit.NONE) this.speechBubbleSelected = false;
+            return true;
+        }
         return false;
     }
 
@@ -692,6 +784,9 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         entity.setSpeechText(this.speechText);
         entity.setSpeechImageSource(this.speechImage);
         entity.setFacesLookingPlayer(this.faceLookingPlayer);
+        entity.setSpeechBubbleOffset(this.speechBubbleOffsetX, this.speechBubbleOffsetY);
+        entity.setSpeechBubbleWidth(this.speechBubbleWidth);
+        entity.setSpeechBubbleScale(this.speechBubbleScale);
         entity.setCustomSkinPlayer(this.customSkinPlayer);
         entity.setCustomSkinSource(this.customSkinSource);
         entity.setCustomSkinEnabled(this.customSkinEnabled && this.validCustomSkinInput());
@@ -711,6 +806,9 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         entity.setSpeechText(this.initialSpeechText);
         entity.setSpeechImageSource(this.initialSpeechImage);
         entity.setFacesLookingPlayer(this.initialFaceLookingPlayer);
+        entity.setSpeechBubbleOffset(this.initialSpeechBubbleOffsetX, this.initialSpeechBubbleOffsetY);
+        entity.setSpeechBubbleWidth(this.initialSpeechBubbleWidth);
+        entity.setSpeechBubbleScale(this.initialSpeechBubbleScale);
         entity.setCustomSkinPlayer(this.initialCustomSkinPlayer);
         entity.setCustomSkinSource(this.initialCustomSkinSource);
         entity.setCustomSkinEnabled(this.initialCustomSkinEnabled);
@@ -719,7 +817,8 @@ public class ExhibitionCharacterConfigScreen extends Screen {
     private ExhibitionCharacterConfigPayload payload(boolean remove) {
         return new ExhibitionCharacterConfigPayload(this.entityId, this.selectedCharacterId, this.selectedSkinId,
                 this.x, this.y, this.z, this.yaw, this.scale, this.customName, this.showName, this.speechText, this.speechImage,
-                this.faceLookingPlayer, this.customSkinEnabled, this.customSkinPlayer, this.customSkinSource, remove);
+                this.faceLookingPlayer, this.speechBubbleOffsetX, this.speechBubbleOffsetY, this.speechBubbleWidth, this.speechBubbleScale,
+                this.customSkinEnabled, this.customSkinPlayer, this.customSkinSource, remove);
     }
 
     private void positionChanged(String ignored) {
@@ -813,12 +912,104 @@ public class ExhibitionCharacterConfigScreen extends Screen {
                 && parsedYaw != null && Float.isFinite(parsedYaw) && parsedScale != null && Float.isFinite(parsedScale)
                 && parsedScale >= ExhibitionCharacterEntity.MIN_SCALE && parsedScale <= ExhibitionCharacterEntity.MAX_SCALE
                 && ExhibitionCharacterEntity.validSpeechImageSource(this.speechImageBox.getValue())
+                && ExhibitionCharacterEntity.validSpeechBubbleLayout(this.speechBubbleOffsetX, this.speechBubbleOffsetY, this.speechBubbleWidth, this.speechBubbleScale)
                 && (!this.customSkinEnabled || this.validCustomSkinInput());
     }
 
     private boolean validCustomSkinInput() {
         String source = this.customSkinBox == null ? this.customSkinSource : this.customSkinBox.getValue();
         return ExhibitionCharacterEntity.validCustomSkinSource(this.customSkinPlayer, source);
+    }
+
+    private SpeechBubbleBounds speechBubbleBounds(Layout layout) {
+        float logicalWidth = this.speechBubbleWidth > 0.0F ? this.speechBubbleWidth : AUTO_SPEECH_BUBBLE_WIDTH;
+        float logicalHeight = this.speechBubblePreviewHeight(logicalWidth);
+        float previewScale = SPEECH_BUBBLE_PREVIEW_SCALE * this.speechBubbleScale;
+        int width = Math.max(20, Math.round(logicalWidth * previewScale));
+        int height = Math.max(16, Math.round(logicalHeight * previewScale));
+        int editorY = layout.displaySpeechBubbleEditorY(this.contentScroll);
+        int centerX = layout.contentX() + layout.contentW() / 2 + Math.round(this.speechBubbleOffsetX * SPEECH_BUBBLE_OFFSET_PREVIEW_SCALE);
+        int centerY = editorY + SPEECH_BUBBLE_EDITOR_HEIGHT / 2 + Math.round(this.speechBubbleOffsetY * SPEECH_BUBBLE_OFFSET_PREVIEW_SCALE);
+        return new SpeechBubbleBounds(centerX - width / 2, centerY - height / 2, width, height);
+    }
+
+    private float speechBubblePreviewHeight(float logicalWidth) {
+        float innerWidth = Math.max(1.0F, logicalWidth - 14.0F);
+        float height = 10.0F;
+        String text = this.speechBox == null ? this.speechText : this.speechBox.getValue();
+        String image = this.speechImageBox == null ? this.speechImage : this.speechImageBox.getValue();
+        if (image != null && !image.isBlank()) height += 68.0F * Math.min(120.0F, innerWidth) / 120.0F;
+        if (text != null && !text.isBlank()) {
+            if (image != null && !image.isBlank()) height += 4.0F;
+            int lineWidth = Math.max(12, Math.round(innerWidth));
+            int lines = Math.max(1, this.font.split(Component.literal(text.replace("\\n", "\n")), lineWidth).size());
+            height += lines * 10.0F;
+        }
+        return Math.max(34.0F, height);
+    }
+
+    private SpeechBubbleHit speechBubbleHit(Layout layout, double mouseX, double mouseY) {
+        if (this.tab != ConfigTab.DISPLAY) return SpeechBubbleHit.NONE;
+        int editorY = layout.displaySpeechBubbleEditorY(this.contentScroll);
+        if (!this.isInside(mouseX, mouseY, layout.contentX(), editorY, layout.contentW(), SPEECH_BUBBLE_EDITOR_HEIGHT)) return SpeechBubbleHit.NONE;
+        SpeechBubbleBounds bubble = this.speechBubbleBounds(layout);
+        int edge = 6;
+        if (mouseY >= bubble.y() - edge && mouseY <= bubble.bottom() + edge) {
+            if (Math.abs(mouseX - bubble.x()) <= edge) return SpeechBubbleHit.WIDTH_LEFT;
+            if (Math.abs(mouseX - bubble.right()) <= edge) return SpeechBubbleHit.WIDTH_RIGHT;
+        }
+        if (mouseX >= bubble.x() - edge && mouseX <= bubble.right() + edge) {
+            if (Math.abs(mouseY - bubble.y()) <= edge) return SpeechBubbleHit.SCALE_TOP;
+            if (Math.abs(mouseY - bubble.bottom()) <= edge) return SpeechBubbleHit.SCALE_BOTTOM;
+        }
+        return this.isInside(mouseX, mouseY, bubble.x(), bubble.y(), bubble.width(), bubble.height()) ? SpeechBubbleHit.BODY : SpeechBubbleHit.NONE;
+    }
+
+    private void beginSpeechBubbleDrag(double mouseX, double mouseY, SpeechBubbleHit hit) {
+        this.speechBubbleSelected = hit != SpeechBubbleHit.NONE;
+        if (hit == SpeechBubbleHit.NONE) return;
+        this.speechBubbleDragStartMouseX = mouseX;
+        this.speechBubbleDragStartMouseY = mouseY;
+        this.speechBubbleDragStartOffsetX = this.speechBubbleOffsetX;
+        this.speechBubbleDragStartOffsetY = this.speechBubbleOffsetY;
+        this.speechBubbleDragStartWidth = this.speechBubbleWidth > 0.0F ? this.speechBubbleWidth : AUTO_SPEECH_BUBBLE_WIDTH;
+        this.speechBubbleDragStartScale = this.speechBubbleScale;
+        this.speechBubbleResizeDirection = hit == SpeechBubbleHit.WIDTH_LEFT || hit == SpeechBubbleHit.SCALE_TOP ? -1 : 1;
+        this.speechBubbleDrag = switch (hit) {
+            case WIDTH_LEFT, WIDTH_RIGHT -> SpeechBubbleDrag.RESIZE_WIDTH;
+            case SCALE_TOP, SCALE_BOTTOM -> SpeechBubbleDrag.RESIZE_SCALE;
+            case BODY -> SpeechBubbleDrag.MOVE;
+            case NONE -> SpeechBubbleDrag.NONE;
+        };
+    }
+
+    private void dragSpeechBubble(double mouseX, double mouseY) {
+        double deltaX = mouseX - this.speechBubbleDragStartMouseX;
+        double deltaY = mouseY - this.speechBubbleDragStartMouseY;
+        if (this.speechBubbleDrag == SpeechBubbleDrag.MOVE) {
+            this.speechBubbleOffsetX = Mth.clamp(this.speechBubbleDragStartOffsetX + (float) (deltaX / SPEECH_BUBBLE_OFFSET_PREVIEW_SCALE),
+                    -ExhibitionCharacterEntity.MAX_SPEECH_BUBBLE_OFFSET, ExhibitionCharacterEntity.MAX_SPEECH_BUBBLE_OFFSET);
+            this.speechBubbleOffsetY = Mth.clamp(this.speechBubbleDragStartOffsetY + (float) (deltaY / SPEECH_BUBBLE_OFFSET_PREVIEW_SCALE),
+                    -ExhibitionCharacterEntity.MAX_SPEECH_BUBBLE_OFFSET, ExhibitionCharacterEntity.MAX_SPEECH_BUBBLE_OFFSET);
+        } else if (this.speechBubbleDrag == SpeechBubbleDrag.RESIZE_WIDTH) {
+            float divisor = Math.max(0.01F, SPEECH_BUBBLE_PREVIEW_SCALE * this.speechBubbleScale);
+            this.speechBubbleWidth = Mth.clamp(this.speechBubbleDragStartWidth + (float) deltaX * this.speechBubbleResizeDirection / divisor,
+                    ExhibitionCharacterEntity.MIN_SPEECH_BUBBLE_WIDTH, ExhibitionCharacterEntity.MAX_SPEECH_BUBBLE_WIDTH);
+        } else if (this.speechBubbleDrag == SpeechBubbleDrag.RESIZE_SCALE) {
+            this.speechBubbleScale = Mth.clamp(this.speechBubbleDragStartScale + (float) deltaY * this.speechBubbleResizeDirection / 70.0F,
+                    ExhibitionCharacterEntity.MIN_SPEECH_BUBBLE_SCALE, ExhibitionCharacterEntity.MAX_SPEECH_BUBBLE_SCALE);
+        }
+        this.applyLivePreview();
+    }
+
+    private void resetSpeechBubbleLayout() {
+        this.speechBubbleOffsetX = 0.0F;
+        this.speechBubbleOffsetY = 0.0F;
+        this.speechBubbleWidth = 0.0F;
+        this.speechBubbleScale = 1.0F;
+        this.speechBubbleSelected = false;
+        this.speechBubbleDrag = SpeechBubbleDrag.NONE;
+        this.applyLivePreview();
     }
 
     private CharacterDefinition selectedCharacter() {
@@ -875,7 +1066,7 @@ public class ExhibitionCharacterConfigScreen extends Screen {
 
     private int contentHeight(Layout layout) {
         if (this.tab == ConfigTab.CUSTOM_SKIN) return this.customSkinContentLayout(layout, 0.0F).contentHeight();
-        if (this.tab == ConfigTab.DISPLAY) return 258;
+        if (this.tab == ConfigTab.DISPLAY) return 424;
         int characterRows = (this.characters.size() + this.characterColumns(layout) - 1) / this.characterColumns(layout);
         int characterGridH = Math.max(0, characterRows * (CHARACTER_CARD_H + GAP) - GAP);
         return 16 + characterGridH + 5;
@@ -1026,7 +1217,8 @@ public class ExhibitionCharacterConfigScreen extends Screen {
             if (this.isInside(mouseX, mouseY, layout.contentX(), layout.contentY(), layout.contentW(), layout.contentH())
                     && (this.isInside(mouseX, mouseY, layout.contentX(), buttonY, showButtonW, 20)
                     || this.isInside(mouseX, mouseY, layout.contentX() + showButtonW + GAP, buttonY, clearButtonW, 20)
-                    || this.isInside(mouseX, mouseY, layout.contentX(), layout.displayLookButtonY(this.contentScroll), layout.contentW(), 20))) return true;
+                    || this.isInside(mouseX, mouseY, layout.contentX(), layout.displayLookButtonY(this.contentScroll), layout.contentW(), 20)
+                    || this.isInside(mouseX, mouseY, layout.contentX(), layout.displaySpeechBubbleResetY(this.contentScroll), layout.contentW(), 20))) return true;
         }
         if (this.submitted) return false;
         for (int index = 0; index < 4; index++) {
@@ -1163,6 +1355,27 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         DISPLAY
     }
 
+    private enum SpeechBubbleDrag {
+        NONE,
+        MOVE,
+        RESIZE_WIDTH,
+        RESIZE_SCALE
+    }
+
+    private enum SpeechBubbleHit {
+        NONE,
+        BODY,
+        WIDTH_LEFT,
+        WIDTH_RIGHT,
+        SCALE_TOP,
+        SCALE_BOTTOM
+    }
+
+    private record SpeechBubbleBounds(int x, int y, int width, int height) {
+        private int right() { return this.x + this.width; }
+        private int bottom() { return this.y + this.height; }
+    }
+
     private record CustomSkinContentLayout(int descriptionY, int enabledButtonY, int typeLabelY, int typeButtonY, int sourceLabelY,
                                            int sourceBoxY, int hintY, int statusY, int contentHeight) {}
 
@@ -1196,6 +1409,9 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         private int displaySpeechBoxY(float scroll) { return this.contentY + 185 - Math.round(scroll); }
         private int displaySpeechImageLabelY(float scroll) { return this.contentY + 214 - Math.round(scroll); }
         private int displaySpeechImageBoxY(float scroll) { return this.contentY + 225 - Math.round(scroll); }
+        private int displaySpeechBubbleLabelY(float scroll) { return this.contentY + 254 - Math.round(scroll); }
+        private int displaySpeechBubbleEditorY(float scroll) { return this.contentY + 267 - Math.round(scroll); }
+        private int displaySpeechBubbleResetY(float scroll) { return this.displaySpeechBubbleEditorY(scroll) + SPEECH_BUBBLE_EDITOR_HEIGHT + 5; }
         private int actionsPerRow() { return this.actionRows == 1 ? 4 : 2; }
         private int actionX(int index) { return this.formX + index % this.actionsPerRow() * (this.actionButtonW + GAP); }
         private int actionY(int index) { return this.actionTop + index / this.actionsPerRow() * (this.actionButtonH + GAP); }

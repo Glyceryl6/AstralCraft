@@ -27,7 +27,7 @@ import java.util.Optional;
 public class ExhibitionSpeechBubbleRenderer {
 
     private static final Identifier BUBBLE_TEXTURE = AstralCraft.prefix("textures/entity/dice/white.png");
-    private static final int MAX_LINE_WIDTH = 180;
+    private static final int DEFAULT_MAX_LINE_WIDTH = 180;
     private static final int BORDER_COLOR = 0xFF3A3040;
     private static final int BACKGROUND_COLOR = 0xFFFFF9FF;
     private static final int TEXT_COLOR = 0xFF28202C;
@@ -54,22 +54,28 @@ public class ExhibitionSpeechBubbleRenderer {
             Vec3 anchor = entity.position().add(0.0D, entity.getBbHeight() + Math.max(0.62D, entity.displayScale() * 0.34D), 0.0D);
             double distanceToCameraSq = anchor.distanceToSqr(cameraPos);
             if (distanceToCameraSq > MAX_DISTANCE * MAX_DISTANCE) continue;
-            List<Component> lines = split(minecraft, entity.speechText());
+            float configuredWidth = entity.speechBubbleWidth();
+            int lineWidth = configuredWidth > 0.0F ? Math.max(24, Math.round(configuredWidth - PADDING_X * 2.0F)) : DEFAULT_MAX_LINE_WIDTH;
+            List<Component> lines = split(minecraft, entity.speechText(), lineWidth);
             Identifier image = entity.speechImage();
             if (image != null && !ScopedJpgTextureCache.isSupportedTexture(image)) image = null;
             if (lines.isEmpty() && image == null) continue;
-            submitBubble(event, minecraft, anchor, cameraPos, lines, image);
+            submitBubble(event, minecraft, entity, anchor, cameraPos, lines, image);
         }
     }
 
-    private static void submitBubble(SubmitCustomGeometryEvent event, Minecraft minecraft, Vec3 anchor, Vec3 cameraPos, List<Component> lines, Identifier image) {
+    private static void submitBubble(SubmitCustomGeometryEvent event, Minecraft minecraft, ExhibitionCharacterEntity entity, Vec3 anchor, Vec3 cameraPos, List<Component> lines, Identifier image) {
         Font font = minecraft.font;
         float textWidth = 0.0F;
         for (Component line : lines) textWidth = Math.max(textWidth, font.width(line.getVisualOrderText()));
-        float contentWidth = Math.max(textWidth, image == null ? 0.0F : IMAGE_WIDTH);
+        float configuredWidth = entity.speechBubbleWidth();
+        float innerWidth = configuredWidth > 0.0F ? Math.max(1.0F, configuredWidth - PADDING_X * 2.0F) : Float.MAX_VALUE;
+        float imageWidth = image == null ? 0.0F : Math.min(IMAGE_WIDTH, innerWidth);
+        float imageHeight = image == null ? 0.0F : IMAGE_HEIGHT * imageWidth / IMAGE_WIDTH;
+        float contentWidth = Math.max(textWidth, imageWidth);
         float contentHeight = lines.size() * LINE_HEIGHT;
-        if (image != null) contentHeight += IMAGE_HEIGHT + (lines.isEmpty() ? 0.0F : IMAGE_GAP);
-        float bubbleWidth = Math.max(24.0F, contentWidth + PADDING_X * 2.0F);
+        if (image != null) contentHeight += imageHeight + (lines.isEmpty() ? 0.0F : IMAGE_GAP);
+        float bubbleWidth = configuredWidth > 0.0F ? configuredWidth : Math.max(24.0F, contentWidth + PADDING_X * 2.0F);
         float bubbleHeight = contentHeight + PADDING_Y * 2.0F;
         float left = -bubbleWidth / 2.0F;
         float right = bubbleWidth / 2.0F;
@@ -81,13 +87,15 @@ public class ExhibitionSpeechBubbleRenderer {
         poseStack.translate(anchor.x - cameraPos.x, anchor.y - cameraPos.y, anchor.z - cameraPos.z);
         poseStack.mulPose(minecraft.gameRenderer.getMainCamera().rotation());
         poseStack.scale(WORLD_SCALE, -WORLD_SCALE, WORLD_SCALE);
+        poseStack.translate(entity.speechBubbleOffsetX(), entity.speechBubbleOffsetY(), 0.0F);
+        poseStack.scale(entity.speechBubbleScale(), entity.speechBubbleScale(), 1.0F);
         submitBubbleGeometry(collector, poseStack, left, top, right, bottom);
         float contentY = top + PADDING_Y;
         if (image != null) {
-            float imageLeft = -IMAGE_WIDTH / 2.0F;
-            float imageRight = IMAGE_WIDTH / 2.0F;
+            float imageLeft = -imageWidth / 2.0F;
+            float imageRight = imageWidth / 2.0F;
             float imageTop = contentY;
-            float imageBottom = imageTop + IMAGE_HEIGHT;
+            float imageBottom = imageTop + imageHeight;
             collector.order(1).submitCustomGeometry(poseStack, RenderTypes.entityTranslucent(ScopedJpgTextureCache.resolve(image)),
                     (pose, consumer) -> texturedQuad(consumer, pose, imageLeft, imageTop, imageRight, imageBottom, IMAGE_Z));
             contentY = imageBottom + (lines.isEmpty() ? 0.0F : IMAGE_GAP);
@@ -159,12 +167,12 @@ public class ExhibitionSpeechBubbleRenderer {
                 .setLight(LightCoordsUtil.FULL_BRIGHT).setNormal(pose, 0.0F, 0.0F, 1.0F);
     }
 
-    private static List<Component> split(Minecraft minecraft, String text) {
+    private static List<Component> split(Minecraft minecraft, String text, int maxLineWidth) {
         if (text == null || text.isBlank()) return List.of();
         List<Component> lines = new ArrayList<>();
         String resolvedText = text.replace("\\n", "\n");
         for (Component segment : AstralTextFormatter.lines(resolvedText)) {
-            for (FormattedText line : minecraft.font.getSplitter().splitLines(segment, MAX_LINE_WIDTH, Style.EMPTY)) {
+            for (FormattedText line : minecraft.font.getSplitter().splitLines(segment, Math.max(1, maxLineWidth), Style.EMPTY)) {
                 lines.add(toComponent(line));
             }
         }

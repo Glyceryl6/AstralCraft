@@ -47,6 +47,11 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
     public static final int MAX_SPEECH_IMAGE_SOURCE_LENGTH = 256;
     public static final int MAX_CUSTOM_NAME_LENGTH = 64;
     public static final int MAX_CUSTOM_SKIN_SOURCE_LENGTH = 256;
+    public static final float MIN_SPEECH_BUBBLE_WIDTH = 72.0F;
+    public static final float MAX_SPEECH_BUBBLE_WIDTH = 320.0F;
+    public static final float MIN_SPEECH_BUBBLE_SCALE = 0.5F;
+    public static final float MAX_SPEECH_BUBBLE_SCALE = 2.0F;
+    public static final float MAX_SPEECH_BUBBLE_OFFSET = 320.0F;
     private static final double LOOK_DISTANCE = 10.0D;
     private static final double LOOK_MIN_DOT = 0.84D;
     private static final float HEAD_TURN_SPEED = 10.0F;
@@ -57,6 +62,10 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
     private static final EntityDataAccessor<Float> DATA_EXHIBITION_YAW = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<String> DATA_SPEECH_TEXT = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<String> DATA_SPEECH_IMAGE = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<Float> DATA_SPEECH_BUBBLE_OFFSET_X = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> DATA_SPEECH_BUBBLE_OFFSET_Y = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> DATA_SPEECH_BUBBLE_WIDTH = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> DATA_SPEECH_BUBBLE_SCALE = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Boolean> DATA_FACE_LOOKING_PLAYER = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> DATA_CUSTOM_SKIN_ENABLED = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> DATA_CUSTOM_SKIN_PLAYER = SynchedEntityData.defineId(ExhibitionCharacterEntity.class, EntityDataSerializers.BOOLEAN);
@@ -77,6 +86,10 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
         builder.define(DATA_EXHIBITION_YAW, 0.0F);
         builder.define(DATA_SPEECH_TEXT, "");
         builder.define(DATA_SPEECH_IMAGE, "");
+        builder.define(DATA_SPEECH_BUBBLE_OFFSET_X, 0.0F);
+        builder.define(DATA_SPEECH_BUBBLE_OFFSET_Y, 0.0F);
+        builder.define(DATA_SPEECH_BUBBLE_WIDTH, 0.0F);
+        builder.define(DATA_SPEECH_BUBBLE_SCALE, 1.0F);
         builder.define(DATA_FACE_LOOKING_PLAYER, false);
         builder.define(DATA_CUSTOM_SKIN_ENABLED, false);
         builder.define(DATA_CUSTOM_SKIN_PLAYER, true);
@@ -163,10 +176,12 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
 
     public boolean applyConfiguration(Identifier characterId, String skinId, double x, double y, double z, float yaw, float scale,
                                       String customName, boolean showName, String speechText, String speechImage, boolean faceLookingPlayer,
+                                      float speechBubbleOffsetX, float speechBubbleOffsetY, float speechBubbleWidth, float speechBubbleScale,
                                       boolean customSkinEnabled, boolean customSkinPlayer, String customSkinSource) {
         if (!CharacterManager.INSTANCE.contains(characterId) || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)
                 || !Float.isFinite(yaw) || !Float.isFinite(scale) || (customName != null && customName.length() > MAX_CUSTOM_NAME_LENGTH)
-                || (speechText != null && speechText.length() > MAX_SPEECH_LENGTH) || !validSpeechImageSource(speechImage)) return false;
+                || (speechText != null && speechText.length() > MAX_SPEECH_LENGTH) || !validSpeechImageSource(speechImage)
+                || !validSpeechBubbleLayout(speechBubbleOffsetX, speechBubbleOffsetY, speechBubbleWidth, speechBubbleScale)) return false;
         if (customSkinEnabled && !validCustomSkinSource(customSkinPlayer, customSkinSource)) return false;
         CharacterDefinition definition = CharacterManager.INSTANCE.get(characterId);
         CharacterSkinDefinition skin = definition.skins().stream().filter(value -> value.id().equals(skinId)).findFirst().orElse(null);
@@ -180,6 +195,9 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
         this.setSpeechText(speechText);
         this.setSpeechImageSource(speechImage);
         this.setFacesLookingPlayer(faceLookingPlayer);
+        this.setSpeechBubbleOffset(speechBubbleOffsetX, speechBubbleOffsetY);
+        this.setSpeechBubbleWidth(speechBubbleWidth);
+        this.setSpeechBubbleScale(speechBubbleScale);
         this.setCustomSkinPlayer(customSkinPlayer);
         this.setCustomSkinSource(customSkinSource);
         this.setCustomSkinEnabled(customSkinEnabled);
@@ -192,7 +210,8 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
         PacketDistributor.sendToPlayer(player, new OpenExhibitionCharacterConfigPayload(
                 this.getId(), CharacterManager.INSTANCE.values(), this.characterId(), this.skinId(), this.getX(), this.getY(), this.getZ(),
                 this.displayYaw(), this.displayScale(), this.displayCustomName(), this.isCustomNameVisible(), this.speechText(),
-                this.speechImageSource(), this.facesLookingPlayer(), this.customSkinEnabled(), this.customSkinPlayer(), this.customSkinSource()));
+                this.speechImageSource(), this.facesLookingPlayer(), this.speechBubbleOffsetX(), this.speechBubbleOffsetY(),
+                this.speechBubbleWidth(), this.speechBubbleScale(), this.customSkinEnabled(), this.customSkinPlayer(), this.customSkinSource()));
     }
 
     public boolean canPlayerConfigure(Player player) {
@@ -283,6 +302,46 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
         return safeSource.isEmpty() || safeSource.length() <= MAX_SPEECH_IMAGE_SOURCE_LENGTH && Identifier.tryParse(safeSource) != null;
     }
 
+    public float speechBubbleOffsetX() {
+        float offset = this.entityData.get(DATA_SPEECH_BUBBLE_OFFSET_X);
+        return Float.isFinite(offset) ? Mth.clamp(offset, -MAX_SPEECH_BUBBLE_OFFSET, MAX_SPEECH_BUBBLE_OFFSET) : 0.0F;
+    }
+
+    public float speechBubbleOffsetY() {
+        float offset = this.entityData.get(DATA_SPEECH_BUBBLE_OFFSET_Y);
+        return Float.isFinite(offset) ? Mth.clamp(offset, -MAX_SPEECH_BUBBLE_OFFSET, MAX_SPEECH_BUBBLE_OFFSET) : 0.0F;
+    }
+
+    public void setSpeechBubbleOffset(float x, float y) {
+        this.entityData.set(DATA_SPEECH_BUBBLE_OFFSET_X, Float.isFinite(x) ? Mth.clamp(x, -MAX_SPEECH_BUBBLE_OFFSET, MAX_SPEECH_BUBBLE_OFFSET) : 0.0F);
+        this.entityData.set(DATA_SPEECH_BUBBLE_OFFSET_Y, Float.isFinite(y) ? Mth.clamp(y, -MAX_SPEECH_BUBBLE_OFFSET, MAX_SPEECH_BUBBLE_OFFSET) : 0.0F);
+    }
+
+    public float speechBubbleWidth() {
+        float width = this.entityData.get(DATA_SPEECH_BUBBLE_WIDTH);
+        return !Float.isFinite(width) || width <= 0.0F ? 0.0F : Mth.clamp(width, MIN_SPEECH_BUBBLE_WIDTH, MAX_SPEECH_BUBBLE_WIDTH);
+    }
+
+    public void setSpeechBubbleWidth(float width) {
+        this.entityData.set(DATA_SPEECH_BUBBLE_WIDTH, !Float.isFinite(width) || width <= 0.0F ? 0.0F : Mth.clamp(width, MIN_SPEECH_BUBBLE_WIDTH, MAX_SPEECH_BUBBLE_WIDTH));
+    }
+
+    public float speechBubbleScale() {
+        float scale = this.entityData.get(DATA_SPEECH_BUBBLE_SCALE);
+        return Float.isFinite(scale) ? Mth.clamp(scale, MIN_SPEECH_BUBBLE_SCALE, MAX_SPEECH_BUBBLE_SCALE) : 1.0F;
+    }
+
+    public void setSpeechBubbleScale(float scale) {
+        this.entityData.set(DATA_SPEECH_BUBBLE_SCALE, Float.isFinite(scale) ? Mth.clamp(scale, MIN_SPEECH_BUBBLE_SCALE, MAX_SPEECH_BUBBLE_SCALE) : 1.0F);
+    }
+
+    public static boolean validSpeechBubbleLayout(float offsetX, float offsetY, float width, float scale) {
+        if (!Float.isFinite(offsetX) || !Float.isFinite(offsetY) || !Float.isFinite(width) || !Float.isFinite(scale)) return false;
+        if (Math.abs(offsetX) > MAX_SPEECH_BUBBLE_OFFSET || Math.abs(offsetY) > MAX_SPEECH_BUBBLE_OFFSET) return false;
+        if (width != 0.0F && (width < MIN_SPEECH_BUBBLE_WIDTH || width > MAX_SPEECH_BUBBLE_WIDTH)) return false;
+        return scale >= MIN_SPEECH_BUBBLE_SCALE && scale <= MAX_SPEECH_BUBBLE_SCALE;
+    }
+
     public boolean facesLookingPlayer() {
         return this.entityData.get(DATA_FACE_LOOKING_PLAYER);
     }
@@ -356,6 +415,9 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
         super.readAdditionalSaveData(input);
         this.setSpeechText(input.getStringOr("exhibition_speech", ""));
         this.setSpeechImageSource(input.getStringOr("exhibition_speech_image", ""));
+        this.setSpeechBubbleOffset(input.getFloatOr("exhibition_speech_bubble_offset_x", 0.0F), input.getFloatOr("exhibition_speech_bubble_offset_y", 0.0F));
+        this.setSpeechBubbleWidth(input.getFloatOr("exhibition_speech_bubble_width", 0.0F));
+        this.setSpeechBubbleScale(input.getFloatOr("exhibition_speech_bubble_scale", 1.0F));
         this.setFacesLookingPlayer(input.getBooleanOr("exhibition_face_looking_player", false));
         this.setCustomSkinPlayer(input.getBooleanOr("exhibition_custom_skin_player", true));
         this.setCustomSkinSource(input.getStringOr("exhibition_custom_skin_source", ""));
@@ -372,6 +434,10 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
         output.putFloat("exhibition_yaw", this.displayYaw());
         output.putString("exhibition_speech", this.speechText());
         output.putString("exhibition_speech_image", this.speechImageSource());
+        output.putFloat("exhibition_speech_bubble_offset_x", this.speechBubbleOffsetX());
+        output.putFloat("exhibition_speech_bubble_offset_y", this.speechBubbleOffsetY());
+        output.putFloat("exhibition_speech_bubble_width", this.speechBubbleWidth());
+        output.putFloat("exhibition_speech_bubble_scale", this.speechBubbleScale());
         output.putBoolean("exhibition_face_looking_player", this.facesLookingPlayer());
         output.putBoolean("exhibition_custom_skin_enabled", this.customSkinEnabled());
         output.putBoolean("exhibition_custom_skin_player", this.customSkinPlayer());
