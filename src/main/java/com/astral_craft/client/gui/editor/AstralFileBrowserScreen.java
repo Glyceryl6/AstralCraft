@@ -85,10 +85,10 @@ public class AstralFileBrowserScreen extends Screen {
         graphics.fill(layout.panelX(), layout.panelY(), layout.panelRight(), layout.panelY() + 3, 0xFFE83CA8);
         graphics.centeredText(this.font, this.title, this.width / 2, layout.panelY() + 9, 0xFFFFFFFF);
         graphics.text(this.font, Component.translatable("gui.astral_craft.creator.file_browser.current_path"), layout.pathX(), layout.pathY() - 11, 0xFFD7E4F2);
+        this.renderButton(graphics, layout.pathDropX(), layout.pathY(), layout.pathDropW(), 20, "gui.astral_craft.creator.file_browser.path_dropdown", mouseX, mouseY, 0xFF5664B7);
         this.renderButton(graphics, layout.upX(), layout.pathY(), layout.smallButtonW(), 20, "gui.astral_craft.creator.file_browser.up", mouseX, mouseY, 0xFF5664B7);
         this.renderButton(graphics, layout.goX(), layout.pathY(), layout.smallButtonW(), 20, "gui.astral_craft.creator.file_browser.go", mouseX, mouseY, 0xFF5664B7);
         this.renderButton(graphics, layout.refreshX(), layout.pathY(), layout.smallButtonW(), 20, "gui.astral_craft.creator.file_browser.refresh", mouseX, mouseY, 0xFF5664B7);
-        this.renderPathMenu(graphics, layout, mouseX, mouseY);
         AstralFancyButton.renderOutlinedBox(graphics, layout.listX(), layout.listY(), layout.listW(), layout.listH(),
                 0x9E0F111A, 0xA6545B70, 0x66101018, 1, 1);
         this.renderEntries(graphics, layout, mouseX, mouseY);
@@ -107,6 +107,8 @@ public class AstralFileBrowserScreen extends Screen {
         this.renderButton(graphics, layout.cancelX(), layout.actionY(), layout.actionButtonW(), 22,
                 "gui.astral_craft.cancel", mouseX, mouseY, 0xFF646477);
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+        if (this.pathMenuOpen) graphics.nextStratum();
+        this.renderPathMenu(graphics, layout, mouseX, mouseY);
         if ((this.pathBox != null && this.pathBox.isMouseOver(mouseX, mouseY))
                 || (this.folderNameBox != null && this.folderNameBox.isMouseOver(mouseX, mouseY))) graphics.requestCursor(CursorTypes.IBEAM);
         else if (this.hoveredControl(layout, mouseX, mouseY)) graphics.requestCursor(CursorTypes.POINTING_HAND);
@@ -128,7 +130,7 @@ public class AstralFileBrowserScreen extends Screen {
         List<Path> ancestors = this.pathAncestors();
         int x = layout.pathX();
         int y = layout.pathY() + 21;
-        int width = Math.min(layout.innerW(), Math.max(layout.pathW(), 180));
+        int width = Math.clamp(layout.pathW() + GAP + layout.pathDropW(), 180, layout.innerW());
         int height = ancestors.size() * ROW_HEIGHT + 4;
         AstralFancyButton.renderOutlinedBox(graphics, x, y, width, height, 0xF2151723, 0xE8545B70, 0xD0101018, 1, 1);
         for (int index = 0; index < ancestors.size(); index++) {
@@ -144,7 +146,7 @@ public class AstralFileBrowserScreen extends Screen {
         List<Path> ancestors = this.pathAncestors();
         int x = layout.pathX();
         int y = layout.pathY() + 21;
-        int width = Math.min(layout.innerW(), Math.max(layout.pathW(), 180));
+        int width = Math.clamp(layout.pathW() + GAP + layout.pathDropW(), 180, layout.innerW());
         if (!this.isInside(mouseX, mouseY, x, y, width, ancestors.size() * ROW_HEIGHT + 4)) {
             this.pathMenuOpen = false;
             return false;
@@ -192,6 +194,10 @@ public class AstralFileBrowserScreen extends Screen {
         BrowserLayout layout = this.layout();
         double mouseX = event.x();
         double mouseY = event.y();
+        if (this.isInside(mouseX, mouseY, layout.pathDropX(), layout.pathY(), layout.pathDropW(), 20)) {
+            this.pathMenuOpen = !this.pathMenuOpen;
+            return true;
+        }
         if (this.isInside(mouseX, mouseY, layout.pathX(), layout.pathY() - 12, layout.pathW(), 11)) {
             this.pathMenuOpen = !this.pathMenuOpen;
             return true;
@@ -362,7 +368,8 @@ public class AstralFileBrowserScreen extends Screen {
     }
 
     private boolean hoveredControl(BrowserLayout layout, double mouseX, double mouseY) {
-        if (this.isInside(mouseX, mouseY, layout.upX(), layout.pathY(), layout.smallButtonW(), 20)
+        if (this.isInside(mouseX, mouseY, layout.pathDropX(), layout.pathY(), layout.pathDropW(), 20)
+                || this.isInside(mouseX, mouseY, layout.upX(), layout.pathY(), layout.smallButtonW(), 20)
                 || this.isInside(mouseX, mouseY, layout.goX(), layout.pathY(), layout.smallButtonW(), 20)
                 || this.isInside(mouseX, mouseY, layout.refreshX(), layout.pathY(), layout.smallButtonW(), 20)
                 || this.isInside(mouseX, mouseY, layout.selectX(), layout.actionY(), layout.actionButtonW(), 22)
@@ -376,16 +383,18 @@ public class AstralFileBrowserScreen extends Screen {
     }
 
     private BrowserLayout layout() {
-        int panelW = Math.clamp(this.width - 24, 280, 620);
-        int panelH = Math.clamp(this.height - 24, 230, 410);
+        int panelW = Math.clamp(this.width - 12, 1, 620);
+        int panelH = Math.clamp(this.height - 12, 1, 410);
         int panelX = (this.width - panelW) / 2;
         int panelY = (this.height - panelH) / 2;
         int innerX = panelX + 9;
-        int innerW = panelW - 18;
-        int smallButtonW = Math.clamp(innerW / 8, 52, 78);
+        int innerW = Math.max(1, panelW - 18);
+        int smallButtonW = Math.clamp(innerW / 9, 44, 78);
+        int pathDropW = 22;
         int pathY = panelY + 44;
-        int pathW = Math.max(90, innerW - (smallButtonW + GAP) * 3);
-        int upX = innerX + pathW + GAP;
+        int pathW = Math.max(50, innerW - pathDropW - smallButtonW * 3 - GAP * 4);
+        int pathDropX = innerX + pathW + GAP;
+        int upX = pathDropX + pathDropW + GAP;
         int goX = upX + smallButtonW + GAP;
         int refreshX = goX + smallButtonW + GAP;
         int actionY = panelY + panelH - 31;
@@ -393,12 +402,12 @@ public class AstralFileBrowserScreen extends Screen {
         int newFolderY = this.mode == BrowserMode.FOLDER ? statusY - 25 : statusY;
         int listY = pathY + 28;
         int listBottom = this.mode == BrowserMode.FOLDER ? newFolderY - 7 : statusY - 7;
-        int listH = Math.max(60, listBottom - listY);
-        int actionButtonW = Math.max(72, (innerW - GAP) / 2);
-        int newFolderBoxW = Math.max(90, innerW * 2 / 3);
-        int createFolderW = innerW - newFolderBoxW - GAP;
-        return new BrowserLayout(panelX, panelY, panelW, panelH, innerX, innerW, pathY, pathW, smallButtonW, upX, goX, refreshX,
-                listY, listH, newFolderY, newFolderBoxW, createFolderW, statusY, actionY, actionButtonW);
+        int listH = Math.max(24, listBottom - listY);
+        int actionButtonW = Math.max(1, (innerW - GAP) / 2);
+        int newFolderBoxW = Math.max(50, innerW * 2 / 3);
+        int createFolderW = Math.max(1, innerW - newFolderBoxW - GAP);
+        return new BrowserLayout(panelX, panelY, panelW, panelH, innerX, innerW, pathY, pathW, pathDropW, pathDropX,
+                smallButtonW, upX, goX, refreshX, listY, listH, newFolderY, newFolderBoxW, createFolderW, statusY, actionY, actionButtonW);
     }
 
     public enum BrowserMode {
@@ -407,8 +416,8 @@ public class AstralFileBrowserScreen extends Screen {
     }
 
     private record BrowserLayout(int panelX, int panelY, int panelW, int panelH, int innerX, int innerW, int pathY, int pathW,
-                                 int smallButtonW, int upX, int goX, int refreshX, int listY, int listH, int newFolderY,
-                                 int newFolderBoxW, int createFolderW, int statusY, int actionY, int actionButtonW) {
+                                 int pathDropW, int pathDropX, int smallButtonW, int upX, int goX, int refreshX, int listY, int listH,
+                                 int newFolderY, int newFolderBoxW, int createFolderW, int statusY, int actionY, int actionButtonW) {
         private int panelRight() { return this.panelX + this.panelW; }
         private int pathX() { return this.innerX; }
         private int listX() { return this.innerX; }
@@ -418,4 +427,5 @@ public class AstralFileBrowserScreen extends Screen {
         private int selectX() { return this.innerX; }
         private int cancelX() { return this.innerX + this.actionButtonW + GAP; }
     }
+
 }
