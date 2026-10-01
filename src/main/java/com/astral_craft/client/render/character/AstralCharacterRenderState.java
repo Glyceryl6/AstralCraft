@@ -1,6 +1,7 @@
 package com.astral_craft.client.render.character;
 
 import com.astral_craft.AstralCraft;
+import com.astral_craft.client.animation.AstralAnimationRuntime;
 import com.astral_craft.client.model.character.AstralGeoPose;
 import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.resources.Identifier;
@@ -14,6 +15,8 @@ public class AstralCharacterRenderState extends AvatarRenderState {
     public Identifier animationSetKey = AstralCraft.prefix("humanoid");
     public String animationAction = "idle";
     public float animationTimeSeconds;
+    public float animationNowSeconds;
+    public AstralAnimationRuntime animationRuntime;
     public boolean knockedDown;
     public AstralGeoPose rootPose = AstralGeoPose.IDENTITY;
 

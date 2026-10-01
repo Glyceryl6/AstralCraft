@@ -40,6 +40,13 @@ public record AstralGeoAnimationSet(Identifier id, Map<String, AstralGeoAnimatio
         return clip == null ? this.clips.get(AstralCharacterAction.IDLE.id()) : clip;
     }
 
+    public AstralGeoAnimationClip exactClip(String action) {
+        if (action == null || action.isBlank()) return null;
+        AstralGeoAnimationClip clip = this.clips.get(action);
+        if (clip == null) clip = this.clips.get("animation." + action);
+        return clip;
+    }
+
     public List<String> clipNames() {
         LinkedHashSet<String> names = new LinkedHashSet<>();
         for (String name : this.clips.keySet()) {

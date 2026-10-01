@@ -1,5 +1,7 @@
 package com.astral_craft.common.event;
 
+import com.astral_craft.client.animation.AstralAnimationRuntimeCache;
+
 import com.astral_craft.AstralCraft;
 import com.astral_craft.client.gui.*;
 import com.astral_craft.client.gui.board.*;
@@ -190,7 +192,7 @@ public class ClientEventSubscriber {
 
     @SubscribeEvent
     public static void registerEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {
-        event.registerBlockEntityRenderer(AstralBlockEntities.PLATFORM.get(), context -> new PlatformBlockEntityRenderer());
+        event.registerBlockEntityRenderer(AstralBlockEntities.PLATFORM.get(), _ -> new PlatformBlockEntityRenderer());
         event.registerEntityRenderer(AstralEntities.BOARD_MONSTER_ZOMBIE.get(), BoardMonsterZombieRenderer::new);
         event.registerEntityRenderer(AstralEntities.ASTRAL_DICE.get(), AstralDiceRenderer::new);
         event.registerEntityRenderer(AstralEntities.SOUL_LINK.get(), SoulLinkRenderer::new);
@@ -213,6 +215,7 @@ public class ClientEventSubscriber {
         event.register(CardRevealPayload.TYPE, CardRevealOverlay::show);
         event.register(CardRevealControlPayload.TYPE, CardRevealOverlay::control);
         event.register(CharacterSkillCutinPayload.TYPE, CharacterSkillCutinOverlay::show);
+        event.register(CharacterAnimationCommandPayload.TYPE, AstralAnimationRuntimeCache::handle);
         event.register(CardRevealEntityPayload.TYPE, CardRevealEntityOverlay::show);
         event.register(OpenTargetSelectionPayload.TYPE, TargetSelectionScreen::open);
         event.register(OpenCardNumberSelectionPayload.TYPE, CardNumberSelectionScreen::open);

@@ -91,6 +91,7 @@ public class ModBusEventSubscriber {
         registrar.playToClient(OpenCharacterSettingsPayload.TYPE, OpenCharacterSettingsPayload.STREAM_CODEC);
         registrar.playToClient(OpenHandCardDeckPayload.TYPE, OpenHandCardDeckPayload.STREAM_CODEC);
         registrar.playToClient(CharacterSkillCutinPayload.TYPE, CharacterSkillCutinPayload.STREAM_CODEC);
+        registrar.playToClient(CharacterAnimationCommandPayload.TYPE, CharacterAnimationCommandPayload.STREAM_CODEC);
         registrar.playToClient(OpenCustomPaintingConfigPayload.TYPE, OpenCustomPaintingConfigPayload.STREAM_CODEC);
         registrar.playToClient(OpenExhibitionCharacterConfigPayload.TYPE, OpenExhibitionCharacterConfigPayload.STREAM_CODEC);
         registrar.playToServer(CardTargetSelectionPayload.TYPE, CardTargetSelectionPayload.STREAM_CODEC, AstralServerPayloadHandlers::handleCardTargets);

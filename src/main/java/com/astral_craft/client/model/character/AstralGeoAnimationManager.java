@@ -51,6 +51,11 @@ public class AstralGeoAnimationManager extends SimpleJsonResourceReloadListener<
         return set == null ? null : set.clip(action);
     }
 
+    public AstralGeoAnimationClip exactClip(Identifier id, String action) {
+        AstralGeoAnimationSet set = this.get(id);
+        return set == null ? null : set.exactClip(action);
+    }
+
     public List<AstralGeoAnimationEvent> events(Identifier id, String action) {
         AstralGeoAnimationClip clip = this.clip(id, action);
         return clip == null ? List.of() : clip.events();

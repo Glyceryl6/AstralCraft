@@ -1,9 +1,10 @@
 package com.astral_craft.client.render.character;
 
+import com.astral_craft.client.animation.AstralAnimationEventDispatcher;
+import com.astral_craft.client.animation.AstralAnimationRuntimeCache;
 import com.astral_craft.client.gameplay.character.ClientCharacterDefinitionCache;
 import com.astral_craft.client.gui.board.BoardHudOverlay;
 import com.astral_craft.client.model.character.AstralCharacterAnimationRegistry;
-import com.astral_craft.client.model.character.AstralGeoAnimationManager;
 import com.astral_craft.client.model.character.AstralGeoModelDefinition;
 import com.astral_craft.client.model.character.AstralGeoModelManager;
 import com.astral_craft.common.entity.character.AstralCharacterEntity;
@@ -69,7 +70,10 @@ public class AstralCharacterRenderer<T extends AstralCharacterEntity> extends Mo
         state.knockedDown = entity.isBoardPawn() && "knockdown".equals(entity.animationAction());
         state.animationAction = AstralCharacterAnimationRegistry.clipName(state.characterId, entity.animationAction());
         state.animationTimeSeconds = entity.animationAgeTicks(partialTick) / 20.0F;
-        state.rootPose = AstralGeoAnimationManager.INSTANCE.sample(state.animationSetKey, state.animationAction, "root", state.animationTimeSeconds);
+        state.animationNowSeconds = (entity.level().getGameTime() + partialTick) / 20.0F;
+        state.animationRuntime = AstralAnimationRuntimeCache.get(entity.getUUID());
+        state.rootPose = state.animationRuntime.sample(state.animationSetKey, state.animationAction, state.animationTimeSeconds, "root", state.animationNowSeconds);
+        AstralAnimationEventDispatcher.dispatch(entity, state.animationRuntime.drainEvents());
         state.skin = new PlayerSkin(new ClientAsset.ResourceTexture(skin.texture()), null, null, PlayerModelType.SLIM, true);
         if (entity instanceof ExhibitionCharacterEntity exhibition) {
             if (!exhibition.facesLookingPlayer()) {
@@ -103,7 +107,7 @@ public class AstralCharacterRenderer<T extends AstralCharacterEntity> extends Mo
         if (state.isInvisibleToPlayer) return;
         poseStack.pushPose();
         AstralGeoModelRenderer.submit(model, state.animationSetKey, state.animationAction, state.animationTimeSeconds,
-                state.skin.body().texturePath(), state.lightCoords, poseStack, collector);
+                state.animationNowSeconds, state.animationRuntime, state.skin.body().texturePath(), state.lightCoords, poseStack, collector);
         poseStack.popPose();
     }
 
@@ -130,7 +134,7 @@ public class AstralCharacterRenderer<T extends AstralCharacterEntity> extends Mo
         String lookupKey = uuid == null ? source.toLowerCase(Locale.ROOT) : uuid.toString();
         ResolvableProfile profile = uuid == null ? ResolvableProfile.createUnresolved(source) : ResolvableProfile.createUnresolved(uuid);
         CompletableFuture<Optional<PlayerSkinRenderCache.RenderInfo>> lookup = this.customPlayerSkinLookups.computeIfAbsent(lookupKey, ignored ->
-                this.playerSkinRenderCache.lookup(profile).exceptionally(exception -> Optional.empty()));
+                this.playerSkinRenderCache.lookup(profile).exceptionally(_ -> Optional.empty()));
         return lookup.getNow(Optional.empty()).map(PlayerSkinRenderCache.RenderInfo::playerSkin).orElse(null);
     }
 }

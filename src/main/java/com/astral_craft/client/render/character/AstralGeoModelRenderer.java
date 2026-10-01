@@ -1,8 +1,6 @@
 package com.astral_craft.client.render.character;
 
-import com.astral_craft.client.model.character.AstralGeoAnimationClip;
-import com.astral_craft.client.model.character.AstralGeoAnimationManager;
-import com.astral_craft.client.model.character.AstralGeoAnimationSet;
+import com.astral_craft.client.animation.AstralAnimationRuntime;
 import com.astral_craft.client.model.character.AstralGeoModelDefinition;
 import com.astral_craft.client.model.character.AstralGeoPose;
 import com.astral_craft.client.model.character.AstralGeoTransform;
@@ -20,26 +18,29 @@ import java.util.Set;
 public class AstralGeoModelRenderer {
 
     public static void submit(AstralGeoModelDefinition model, Identifier animationSetKey, String action, float time,
-                              Identifier texture, int light, PoseStack poseStack, SubmitNodeCollector collector) {
+                              float nowSeconds, AstralAnimationRuntime runtime, Identifier texture, int light,
+                              PoseStack poseStack, SubmitNodeCollector collector) {
         if (model == null || !model.hasRenderableGeometry()) return;
-        AstralGeoAnimationSet set = AstralGeoAnimationManager.INSTANCE.get(animationSetKey);
-        AstralGeoAnimationClip clip = set == null ? null : set.clip(action);
         Set<String> rendered = new HashSet<>();
         for (AstralGeoModelDefinition.Bone bone : model.rootBones()) {
-            renderBone(model, bone, clip, time, texture, light, poseStack, collector, rendered);
+            renderBone(model, bone, animationSetKey, action, time, nowSeconds, runtime, texture, light, poseStack, collector, rendered);
         }
     }
 
     private static void renderBone(AstralGeoModelDefinition model, AstralGeoModelDefinition.Bone bone,
-                                   AstralGeoAnimationClip clip, float time, Identifier texture, int light,
-                                   PoseStack poseStack, SubmitNodeCollector collector, Set<String> rendered) {
+                                   Identifier animationSetKey, String action, float time, float nowSeconds, AstralAnimationRuntime runtime,
+                                   Identifier texture, int light, PoseStack poseStack, SubmitNodeCollector collector, Set<String> rendered) {
         if (!rendered.add(bone.name())) return;
         poseStack.pushPose();
-        applyBoneTransform(bone, clip == null ? AstralGeoPose.IDENTITY : clip.sample(bone.name(), time), poseStack);
+        AstralGeoPose animation = runtime == null ? AstralGeoPose.IDENTITY
+                : runtime.sample(animationSetKey, action, time, bone.name(), nowSeconds);
+        applyBoneTransform(bone, animation, poseStack);
         if (!bone.neverRender()) {
             for (AstralGeoModelDefinition.Cube cube : bone.cubes()) renderCube(model, cube, texture, light, poseStack, collector);
         }
-        for (AstralGeoModelDefinition.Bone child : model.children(bone.name())) renderBone(model, child, clip, time, texture, light, poseStack, collector, rendered);
+        for (AstralGeoModelDefinition.Bone child : model.children(bone.name())) {
+            renderBone(model, child, animationSetKey, action, time, nowSeconds, runtime, texture, light, poseStack, collector, rendered);
+        }
         poseStack.popPose();
     }
 
