@@ -30,10 +30,10 @@ public class AstralCharacterRenderStateModifier extends AvatarRenderStateModifie
             CharacterDefinition definition = ClientCharacterDefinitionCache.INSTANCE.getOrFallback(characterState.characterId());
             CharacterSkinDefinition skin = definition.skinOrDefault(characterState.skinId());
             state.skin = new PlayerSkin(new ClientAsset.ResourceTexture(skin.texture()), null, null, PlayerModelType.SLIM, true);
-            String action = this.animationAction(avatar, definition);
+            String action = this.animationAction(avatar, definition, skin);
             state.setRenderData(AstralPlayerCharacterRenderBridge.CHARACTER_RENDER_DATA,
                     new AstralPlayerCharacterRenderBridge.PlayerCharacterRenderData(
-                            definition.modelKey(), definition.rendererKey(), definition.animationSetKey(), action,
+                            skin.modelOr(definition.modelKey()), definition.rendererKey(), skin.animationSetOr(definition.animationSetKey()), action,
                             avatar.tickCount / 20.0F));
         }
 
@@ -42,8 +42,8 @@ public class AstralCharacterRenderStateModifier extends AvatarRenderStateModifie
         }
     }
 
-    protected <T extends Avatar & ClientAvatarEntity> String animationAction(T avatar, CharacterDefinition definition) {
-        List<String> available = AstralGeoAnimationManager.INSTANCE.animationNames(definition.animationSetKey());
+    protected <T extends Avatar & ClientAvatarEntity> String animationAction(T avatar, CharacterDefinition definition, CharacterSkinDefinition skin) {
+        List<String> available = AstralGeoAnimationManager.INSTANCE.animationNames(skin.animationSetOr(definition.animationSetKey()));
         String action;
         if (avatar.isFallFlying()) {
             action = firstAvailable(available, "fall_flying", "fly", "air");

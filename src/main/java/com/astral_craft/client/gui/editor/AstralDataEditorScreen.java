@@ -8,6 +8,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
+import com.mojang.serialization.JsonOps;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Checkbox;
@@ -15,9 +16,15 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.resources.RegistryOps;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
 import org.jspecify.annotations.NonNull;
 import org.lwjgl.glfw.GLFW;
 
@@ -28,15 +35,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Locale;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-@SuppressWarnings("unused")
+@SuppressWarnings({"unused", "SameParameterValue"})
 public class AstralDataEditorScreen extends Screen {
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -46,6 +49,8 @@ public class AstralDataEditorScreen extends Screen {
     private static final int CHECKBOX_GAP = 4;
     private static final int ARGUMENT_ROW_HEIGHT = 34;
     private static final int EVENT_SECTION_GAP = 8;
+    private static final int MAX_REGISTRY_SUGGESTIONS = 8;
+    private static final int SUGGESTION_ROW_HEIGHT = 20;
     private static final int DATA_PACK_MAJOR = 101;
     private static final int DATA_PACK_MINOR = 1;
     private static final int RESOURCE_PACK_MAJOR = 84;
@@ -57,12 +62,21 @@ public class AstralDataEditorScreen extends Screen {
     private Path appearanceSource;
     private Component status = Component.empty();
     private boolean statusError;
+    private final Map<EditBox, Component> boxHints = new IdentityHashMap<>();
+    private final Map<EditBox, RegistrySuggestionKind> registrySuggestionKinds = new IdentityHashMap<>();
+    private final Map<RegistrySuggestionKind, List<Identifier>> registrySuggestionCache = new EnumMap<>(RegistrySuggestionKind.class);
+    private EditBox registrySuggestionBox;
+    private RegistrySuggestionKind registrySuggestionKind;
+    private List<Identifier> registrySuggestions = List.of();
+    private int registrySuggestionIndex;
 
     private EditBox packNameBox;
 
     private EditBox eventIdBox;
     private EditBox eventNameBox;
+    private EditBox eventNameKeyBox;
     private EditBox eventDescriptionBox;
+    private EditBox eventDescriptionKeyBox;
     private EditBox eventTextureBox;
     private EditBox eventCooldownBox;
     private EditBox eventChanceBox;
@@ -81,18 +95,25 @@ public class AstralDataEditorScreen extends Screen {
 
     private EditBox skinEntryIdBox;
     private EditBox skinNameBox;
+    private EditBox skinNameKeyBox;
     private EditBox skinCharacterBox;
     private EditBox skinIdBox;
     private EditBox skinTextureBox;
     private EditBox skinRarityBox;
+    private EditBox skinModelBox;
+    private EditBox skinAnimationSetBox;
     private boolean skinUnlocked;
     private Checkbox skinUnlockedCheckbox;
 
     private EditBox rarityIdBox;
     private EditBox rarityNameBox;
+    private EditBox rarityNameKeyBox;
     private EditBox rarityBorderBox;
     private EditBox rarityBadgeBox;
     private EditBox rarityTextBox;
+    private RgbColorControl rarityBorderColor;
+    private RgbColorControl rarityBadgeColor;
+    private RgbColorControl rarityTextColor;
 
     private EditBox appearanceNamespaceBox;
     private EditBox appearanceNameBox;
@@ -119,11 +140,15 @@ public class AstralDataEditorScreen extends Screen {
     @Override
     protected void init() {
         EditorLayout layout = this.layout();
+        this.boxHints.clear();
+        this.registrySuggestionKinds.clear();
+        this.registrySuggestionCache.clear();
         this.packNameBox = this.recreateBox(this.packNameBox, "gui.astral_craft.creator.pack_name_hint", 64, "astral_creator_pack");
-
         this.eventIdBox = this.recreateBox(this.eventIdBox, "gui.astral_craft.creator.event.id_hint", 160, "example:welcome_event");
         this.eventNameBox = this.recreateBox(this.eventNameBox, "gui.astral_craft.creator.event.name_hint", 160, "");
+        this.eventNameKeyBox = this.recreateBox(this.eventNameKeyBox, "gui.astral_craft.creator.localization_key_hint", 256, "");
         this.eventDescriptionBox = this.recreateBox(this.eventDescriptionBox, "gui.astral_craft.creator.event.description_hint", 256, "");
+        this.eventDescriptionKeyBox = this.recreateBox(this.eventDescriptionKeyBox, "gui.astral_craft.creator.localization_key_hint", 256, "");
         this.eventTextureBox = this.recreateBox(this.eventTextureBox, "gui.astral_craft.creator.event.texture_hint", 256, "astral_craft:textures/gui/cards/event.png");
         this.eventCooldownBox = this.recreateBox(this.eventCooldownBox, "gui.astral_craft.creator.event.cooldown_hint", 12, "600");
         this.eventChanceBox = this.recreateBox(this.eventChanceBox, "gui.astral_craft.creator.event.chance_hint", 12, "1.0");
@@ -133,25 +158,29 @@ public class AstralDataEditorScreen extends Screen {
         this.eventBroadcastCheckbox = this.createCheckbox("gui.astral_craft.creator.event.broadcast", this.eventBroadcast, value -> this.eventBroadcast = value, eventToggleW);
         for (ConditionDraft condition : this.eventConditions) condition.create(this, layout.tabContentW());
         for (EffectDraft effect : this.eventEffects) effect.create(this, layout.tabContentW());
-
+        this.configureRegistrySuggestions();
         this.skinEntryIdBox = this.recreateBox(this.skinEntryIdBox, "gui.astral_craft.creator.skin.entry_id_hint", 160, "example:skins/character/default");
         this.skinNameBox = this.recreateBox(this.skinNameBox, "gui.astral_craft.creator.skin.name_hint", 160, "");
+        this.skinNameKeyBox = this.recreateBox(this.skinNameKeyBox, "gui.astral_craft.creator.localization_key_hint", 256, "");
         this.skinCharacterBox = this.recreateBox(this.skinCharacterBox, "gui.astral_craft.creator.skin.character_hint", 160, "astral_craft:default");
         this.skinIdBox = this.recreateBox(this.skinIdBox, "gui.astral_craft.creator.skin.skin_id_hint", 96, "default");
         this.skinTextureBox = this.recreateBox(this.skinTextureBox, "gui.astral_craft.creator.skin.texture_hint", 256, "example:entity/character/skin_custom");
         this.skinRarityBox = this.recreateBox(this.skinRarityBox, "gui.astral_craft.creator.skin.rarity_hint", 160, "none");
+        this.skinModelBox = this.recreateBox(this.skinModelBox, "gui.astral_craft.creator.skin.model_hint", 160, "");
+        this.skinAnimationSetBox = this.recreateBox(this.skinAnimationSetBox, "gui.astral_craft.creator.skin.animation_set_hint", 160, "");
         this.skinUnlockedCheckbox = this.createCheckbox("gui.astral_craft.creator.skin.unlocked", this.skinUnlocked, value -> this.skinUnlocked = value, layout.halfW());
-
         this.rarityIdBox = this.recreateBox(this.rarityIdBox, "gui.astral_craft.creator.rarity.id_hint", 160, "example:rare");
         this.rarityNameBox = this.recreateBox(this.rarityNameBox, "gui.astral_craft.creator.rarity.name_hint", 160, "");
+        this.rarityNameKeyBox = this.recreateBox(this.rarityNameKeyBox, "gui.astral_craft.creator.localization_key_hint", 256, "");
         this.rarityBorderBox = this.recreateBox(this.rarityBorderBox, "gui.astral_craft.creator.rarity.border_hint", 10, "#FF8ACB");
         this.rarityBadgeBox = this.recreateBox(this.rarityBadgeBox, "gui.astral_craft.creator.rarity.badge_hint", 10, "#F05BAE");
         this.rarityTextBox = this.recreateBox(this.rarityTextBox, "gui.astral_craft.creator.rarity.text_hint", 10, "#FFFFFF");
-
+        this.rarityBorderColor = new RgbColorControl(this.rarityBorderBox);
+        this.rarityBadgeColor = new RgbColorControl(this.rarityBadgeBox);
+        this.rarityTextColor = new RgbColorControl(this.rarityTextBox);
         this.appearanceNamespaceBox = this.recreateBox(this.appearanceNamespaceBox, "gui.astral_craft.creator.appearance.namespace_hint", 64, "example");
         this.appearanceNameBox = this.recreateBox(this.appearanceNameBox, "gui.astral_craft.creator.appearance.name_hint", 96, "custom");
         this.appearanceSourceBox = this.recreateBox(this.appearanceSourceBox, "gui.astral_craft.creator.appearance.source_hint", 1024, "");
-
         this.exportEventCheckbox = this.createCheckbox("gui.astral_craft.creator.export.content.event", this.exportEvent, value -> this.exportEvent = value, layout.tabContentW());
         this.exportSkinCheckbox = this.createCheckbox("gui.astral_craft.creator.export.content.skin", this.exportSkin, value -> this.exportSkin = value, layout.tabContentW());
         this.exportRarityCheckbox = this.createCheckbox("gui.astral_craft.creator.export.content.rarity", this.exportRarity, value -> this.exportRarity = value, layout.tabContentW());
@@ -168,10 +197,35 @@ public class AstralDataEditorScreen extends Screen {
     }
 
     private EditBox createBox(String hintKey, int maxLength) {
-        EditBox box = this.addRenderableWidget(new EditBox(this.font, 0, 0, 100, FIELD_HEIGHT, Component.translatable(hintKey)));
+        Component hint = Component.translatable(hintKey);
+        EditBox box = this.addRenderableWidget(new EditBox(this.font, 0, 0, 100, FIELD_HEIGHT, hint));
         box.setMaxLength(maxLength);
-        box.setHint(Component.translatable(hintKey));
+        box.setHint(hint);
+        this.boxHints.put(box, hint);
         return box;
+    }
+
+    private void configureRegistrySuggestions() {
+        for (ConditionDraft draft : this.eventConditions) {
+            RegistrySuggestionKind kind = switch (draft.type) {
+                case DIMENSION -> RegistrySuggestionKind.DIMENSION;
+                case HAS_ITEM -> RegistrySuggestionKind.ITEM;
+                case HAS_EFFECT -> RegistrySuggestionKind.MOB_EFFECT;
+                case ENTITY_TYPE -> RegistrySuggestionKind.ENTITY_TYPE;
+                case BLOCK_AT -> RegistrySuggestionKind.BLOCK;
+                default -> null;
+            };
+            if (kind != null) this.registrySuggestionKinds.put(draft.arg1, kind);
+        }
+
+        for (EffectDraft draft : this.eventEffects) {
+            RegistrySuggestionKind kind = switch (draft.type) {
+                case GIVE_ITEM, DROP_ITEM -> RegistrySuggestionKind.ITEM;
+                case MOB_EFFECT, CLEAR_EFFECT -> RegistrySuggestionKind.MOB_EFFECT;
+                default -> null;
+            };
+            if (kind != null) this.registrySuggestionKinds.put(draft.arg1, kind);
+        }
     }
 
 
@@ -207,7 +261,6 @@ public class AstralDataEditorScreen extends Screen {
         this.renderButton(graphics, layout.topCloseX(), layout.topCloseY(), layout.topCloseW(), 16,
                 "gui.astral_craft.creator.close_short", mouseX, mouseY, 0xFF646477, false);
         this.renderTabs(graphics, layout, mouseX, mouseY);
-
         graphics.enableScissor(layout.tabContentX(), layout.tabViewportTop(), layout.tabContentRight(), layout.tabViewportBottom());
         switch (this.tab) {
             case EVENT -> this.renderEventTab(graphics, layout, mouseX, mouseY);
@@ -216,13 +269,131 @@ public class AstralDataEditorScreen extends Screen {
             case APPEARANCE -> this.renderAppearanceTab(graphics, layout, mouseX, mouseY);
             case EXPORT -> this.renderExportTab(graphics, layout, mouseX, mouseY);
         }
+
         graphics.disableScissor();
         this.renderTabScrollbar(graphics, layout);
-
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        if (this.anyVisibleBoxHovered(mouseX, mouseY)) graphics.requestCursor(CursorTypes.IBEAM);
-        else if (this.anyVisibleCheckboxHovered(mouseX, mouseY) || this.hoveredManualControl(layout, mouseX, mouseY)) graphics.requestCursor(CursorTypes.POINTING_HAND);
-        else graphics.requestCursor(CursorTypes.ARROW);
+        this.updateRegistrySuggestions();
+        if (!this.registrySuggestions.isEmpty()) {
+            graphics.nextStratum();
+            this.renderRegistrySuggestions(graphics, mouseX, mouseY);
+        } else {
+            this.renderClippedHintTooltip(graphics, mouseX, mouseY);
+        }
+
+        if (this.registrySuggestionHovered(mouseX, mouseY)) {
+            graphics.requestCursor(CursorTypes.POINTING_HAND);
+        } else if (this.anyVisibleBoxHovered(mouseX, mouseY)) {
+            graphics.requestCursor(CursorTypes.IBEAM);
+        } else if (this.anyVisibleCheckboxHovered(mouseX, mouseY) || this.hoveredManualControl(layout, mouseX, mouseY)) {
+            graphics.requestCursor(CursorTypes.POINTING_HAND);
+        } else {
+            graphics.requestCursor(CursorTypes.ARROW);
+        }
+    }
+
+    private void renderClippedHintTooltip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+        for (Map.Entry<EditBox, Component> entry : this.boxHints.entrySet()) {
+            EditBox box = entry.getKey();
+            Component hint = entry.getValue();
+            if (!box.visible || !box.getValue().isEmpty() || !box.isMouseOver(mouseX, mouseY)) continue;
+            if (this.font.width(hint) <= box.getInnerWidth()) return;
+            graphics.setTooltipForNextFrame(this.font, hint, mouseX, mouseY);
+            return;
+        }
+    }
+
+    private void updateRegistrySuggestions() {
+        EditBox focused = null;
+        RegistrySuggestionKind kind = null;
+        for (Map.Entry<EditBox, RegistrySuggestionKind> entry : this.registrySuggestionKinds.entrySet()) {
+            if (entry.getKey().visible && entry.getKey().isFocused()) {
+                focused = entry.getKey();
+                kind = entry.getValue();
+                break;
+            }
+        }
+
+        if (focused == null || kind == null) {
+            this.registrySuggestionBox = null;
+            this.registrySuggestionKind = null;
+            this.registrySuggestions = List.of();
+            this.registrySuggestionIndex = 0;
+            return;
+        }
+
+        String value = focused.getValue();
+        int comma = value.lastIndexOf(',');
+        String token = value.substring(comma + 1).strip().toLowerCase(Locale.ROOT);
+        List<Identifier> matches = this.registrySuggestionCache.computeIfAbsent(kind, v -> v.entries(this).stream()
+                        .sorted(Comparator.comparing(Identifier::toString)).toList()).stream()
+                .filter(id -> !id.toString().equalsIgnoreCase(token))
+                .filter(id -> token.isEmpty() || id.toString().toLowerCase(Locale.ROOT).startsWith(token)
+                        || id.getPath().toLowerCase(Locale.ROOT).startsWith(token))
+                .limit(MAX_REGISTRY_SUGGESTIONS)
+                .toList();
+        this.registrySuggestionBox = focused;
+        this.registrySuggestionKind = kind;
+        this.registrySuggestions = matches;
+        this.registrySuggestionIndex = Math.clamp(this.registrySuggestionIndex, 0, Math.max(0, matches.size() - 1));
+    }
+
+    private void renderRegistrySuggestions(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+        if (this.registrySuggestionBox == null || this.registrySuggestionKind == null || this.registrySuggestions.isEmpty()) return;
+        SuggestionBounds bounds = this.registrySuggestionBounds();
+        AstralFancyButton.renderOutlinedBox(graphics, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
+                0xF0181B26, 0xFF6E7588, 0x00000000, 1, 0);
+        for (int index = 0; index < this.registrySuggestions.size(); index++) {
+            Identifier id = this.registrySuggestions.get(index);
+            int rowY = bounds.y() + index * SUGGESTION_ROW_HEIGHT;
+            boolean hovered = this.isInside(mouseX, mouseY, bounds.x(), rowY, bounds.width(), SUGGESTION_ROW_HEIGHT);
+            if (index == this.registrySuggestionIndex || hovered) graphics.fill(bounds.x() + 1, rowY + 1, bounds.x() + bounds.width() - 1, rowY + SUGGESTION_ROW_HEIGHT - 1, 0x554F6A9B);
+            int textX = bounds.x() + 5;
+            if (this.registrySuggestionKind == RegistrySuggestionKind.ITEM) {
+                ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.getValue(id));
+                graphics.item(stack, bounds.x() + 2, rowY + 2);
+                if (hovered) graphics.setTooltipForNextFrame(this.font, stack.getHoverName(), mouseX, mouseY);
+                textX += 18;
+            }
+            String shown = this.font.plainSubstrByWidth(id.toString(), Math.max(1, bounds.width() - (textX - bounds.x()) - 5));
+            graphics.text(this.font, shown, textX, rowY + 6, 0xFFE6EDF7);
+        }
+    }
+
+    private SuggestionBounds registrySuggestionBounds() {
+        if (this.registrySuggestionBox == null) return new SuggestionBounds(0, 0, 0, 0);
+        int width = Math.clamp(Math.max(this.registrySuggestionBox.getWidth(), 180), 80, Math.max(80, this.width - 8));
+        int height = this.registrySuggestions.size() * SUGGESTION_ROW_HEIGHT;
+        int x = Math.clamp(this.registrySuggestionBox.getX(), 4, Math.max(4, this.width - width - 4));
+        int below = this.registrySuggestionBox.getY() + this.registrySuggestionBox.getHeight() + 1;
+        int y = below + height <= this.height - 4 ? below : this.registrySuggestionBox.getY() - height - 1;
+        return new SuggestionBounds(x, Math.max(4, y), width, height);
+    }
+
+    private boolean registrySuggestionHovered(double mouseX, double mouseY) {
+        if (this.registrySuggestions.isEmpty()) return false;
+        SuggestionBounds bounds = this.registrySuggestionBounds();
+        return this.isInside(mouseX, mouseY, bounds.x(), bounds.y(), bounds.width(), bounds.height());
+    }
+
+    private boolean handleRegistrySuggestionClick(double mouseX, double mouseY) {
+        if (!this.registrySuggestionHovered(mouseX, mouseY)) return false;
+        SuggestionBounds bounds = this.registrySuggestionBounds();
+        int index = (int) ((mouseY - bounds.y()) / SUGGESTION_ROW_HEIGHT);
+        if (index < 0 || index >= this.registrySuggestions.size()) return false;
+        this.registrySuggestionIndex = index;
+        this.applyRegistrySuggestion(this.registrySuggestions.get(index));
+        return true;
+    }
+
+    private void applyRegistrySuggestion(Identifier suggestion) {
+        if (this.registrySuggestionBox == null) return;
+        String value = this.registrySuggestionBox.getValue();
+        int comma = value.lastIndexOf(',');
+        String prefix = comma < 0 ? "" : value.substring(0, comma + 1) + " ";
+        this.registrySuggestionBox.setValue(prefix + suggestion);
+        this.registrySuggestionBox.setCursorPosition(this.registrySuggestionBox.getValue().length());
+        this.registrySuggestions = List.of();
     }
 
     private void renderTabs(GuiGraphicsExtractor graphics, EditorLayout layout, int mouseX, int mouseY) {
@@ -243,19 +414,29 @@ public class AstralDataEditorScreen extends Screen {
         this.label(graphics, "gui.astral_craft.creator.event.description", layout.leftX(), y);
         this.label(graphics, "gui.astral_craft.creator.event.texture", layout.rightX(), y);
         y += 34;
-
+        this.label(graphics, "gui.astral_craft.creator.localization_name_key", layout.leftX(), y);
+        this.label(graphics, "gui.astral_craft.creator.localization_description_key", layout.rightX(), y);
+        int readW = Math.max(54, layout.halfW() / 3);
+        this.renderButton(graphics, layout.leftX() + layout.halfW() - readW, y + 10, readW, FIELD_HEIGHT,
+                "gui.astral_craft.creator.localization_read_short", mouseX, mouseY, 0xFF5664B7, false);
+        this.renderButton(graphics, layout.rightX() + layout.halfW() - readW, y + 10, readW, FIELD_HEIGHT,
+                "gui.astral_craft.creator.localization_read_short", mouseX, mouseY, 0xFF5664B7, false);
+        y += 34;
         this.label(graphics, "gui.astral_craft.creator.event.cooldown", layout.eventMetaX(0), y);
         this.label(graphics, "gui.astral_craft.creator.event.chance", layout.eventMetaX(1), y);
         this.label(graphics, "gui.astral_craft.creator.event.radius", layout.eventMetaX(2), y);
         this.renderButton(graphics, layout.eventMetaX(3), y + 10, layout.eventMetaW(), FIELD_HEIGHT,
                 this.eventTarget.translationKey, mouseX, mouseY, 0xFF5664B7, false);
         y += 36 + this.eventToggleHeight() + EVENT_SECTION_GAP;
-
         y = this.renderConditionSection(graphics, layout, y);
         y += EVENT_SECTION_GAP;
-        y = this.renderEffectSection(graphics, layout, y, false);
+        y = this.renderEffectSection(graphics, layout, y, false, mouseX, mouseY);
         y += EVENT_SECTION_GAP;
-        this.renderEffectSection(graphics, layout, y, true);
+        y = this.renderEffectSection(graphics, layout, y, true, mouseX, mouseY);
+        if (this.status != null && !this.status.getString().isBlank()) {
+            int color = this.statusError ? 0xFFFF8F9E : 0xFF8FE2A9;
+            this.renderWrappedText(graphics, this.status, layout.tabContentX(), y + 6, layout.tabContentW(), color);
+        }
     }
 
     private int renderConditionSection(GuiGraphicsExtractor graphics, EditorLayout layout, int y) {
@@ -271,7 +452,7 @@ public class AstralDataEditorScreen extends Screen {
         return y;
     }
 
-    private int renderEffectSection(GuiGraphicsExtractor graphics, EditorLayout layout, int y, boolean boardOnly) {
+    private int renderEffectSection(GuiGraphicsExtractor graphics, EditorLayout layout, int y, boolean boardOnly, int mouseX, int mouseY) {
         String key = boardOnly ? "gui.astral_craft.creator.event.board_effects" : "gui.astral_craft.creator.event.effects";
         graphics.text(this.font, Component.translatable(key), layout.tabContentX(), y, 0xFFD7E4F2);
         y += 14;
@@ -279,7 +460,7 @@ public class AstralDataEditorScreen extends Screen {
         for (EffectDraft draft : this.eventEffects) {
             if (draft.type.boardOnly() != boardOnly || !draft.hasArguments()) continue;
             y += 4;
-            draft.renderArgumentLabels(graphics, this, layout.tabContentX(), y, layout.tabContentW());
+            draft.renderArgumentLabels(graphics, this, layout.tabContentX(), y, layout.tabContentW(), mouseX, mouseY);
             y += draft.argumentBlockHeight();
         }
         return y;
@@ -296,11 +477,18 @@ public class AstralDataEditorScreen extends Screen {
         this.label(graphics, "gui.astral_craft.creator.skin.entry_id", layout.leftX(), y);
         this.label(graphics, "gui.astral_craft.creator.skin.name", layout.rightX(), y);
         y += 34;
+        this.label(graphics, "gui.astral_craft.creator.localization_key", layout.leftX(), y);
+        this.renderButton(graphics, layout.rightX(), y + 10, layout.halfW(), FIELD_HEIGHT,
+                "gui.astral_craft.creator.localization_read", 0, 0, 0xFF5664B7, false);
+        y += 34;
         this.label(graphics, "gui.astral_craft.creator.skin.character", layout.leftX(), y);
         this.label(graphics, "gui.astral_craft.creator.skin.skin_id", layout.rightX(), y);
         y += 34;
         this.label(graphics, "gui.astral_craft.creator.skin.texture", layout.leftX(), y);
         this.label(graphics, "gui.astral_craft.creator.skin.rarity", layout.rightX(), y);
+        y += 34;
+        this.label(graphics, "gui.astral_craft.creator.skin.model", layout.leftX(), y);
+        this.label(graphics, "gui.astral_craft.creator.skin.animation_set", layout.rightX(), y);
         y += 34 + Math.max(FIELD_HEIGHT, this.skinUnlockedCheckbox == null ? FIELD_HEIGHT : this.skinUnlockedCheckbox.getHeight()) + 8;
         this.renderWrappedText(graphics, Component.translatable("gui.astral_craft.creator.skin.help"), layout.tabContentX(), y, layout.tabContentW(), 0xFF9AA8BA);
     }
@@ -310,11 +498,42 @@ public class AstralDataEditorScreen extends Screen {
         this.label(graphics, "gui.astral_craft.creator.rarity.id", layout.leftX(), y);
         this.label(graphics, "gui.astral_craft.creator.rarity.name", layout.rightX(), y);
         y += 34;
-        this.label(graphics, "gui.astral_craft.creator.rarity.border", layout.rarityColorX(0), y);
-        this.label(graphics, "gui.astral_craft.creator.rarity.badge", layout.rarityColorX(1), y);
-        this.label(graphics, "gui.astral_craft.creator.rarity.text", layout.rarityColorX(2), y);
-        y += 34;
-        this.renderWrappedText(graphics, Component.translatable("gui.astral_craft.creator.rarity.help"), layout.tabContentX(), y, layout.tabContentW(), 0xFF9AA8BA);
+        this.label(graphics, "gui.astral_craft.creator.localization_key", layout.leftX(), y);
+        this.renderButton(graphics, layout.rightX(), y + 10, layout.halfW(), FIELD_HEIGHT,
+                "gui.astral_craft.creator.localization_read", 0, 0, 0xFF5664B7, false);
+        y += 38;
+        y = this.renderColorControl(graphics, layout, y, "gui.astral_craft.creator.rarity.border", this.rarityBorderColor);
+        y = this.renderColorControl(graphics, layout, y, "gui.astral_craft.creator.rarity.badge", this.rarityBadgeColor);
+        y = this.renderColorControl(graphics, layout, y, "gui.astral_craft.creator.rarity.text", this.rarityTextColor);
+        this.renderWrappedText(graphics, Component.translatable("gui.astral_craft.creator.rarity.help"), layout.tabContentX(), y + 4, layout.tabContentW(), 0xFF9AA8BA);
+    }
+
+    private int renderColorControl(GuiGraphicsExtractor graphics, EditorLayout layout, int y, String labelKey, RgbColorControl control) {
+        this.label(graphics, labelKey, layout.tabContentX(), y);
+        int previewX = layout.tabContentRight() - 44;
+        graphics.fill(previewX, y + 10, previewX + 44, y + 30, 0xFF000000 | control.rgb());
+        AstralFancyButton.renderOutlinedBox(graphics, previewX, y + 10, 44, 20, 0x00000000, 0xFFD7E4F2, 0x00000000, 1, 0);
+        int sliderY = y + 36;
+        for (int channel = 0; channel < 3; channel++) {
+            String key = switch (channel) {
+                case 0 -> "gui.astral_craft.creator.color.red";
+                case 1 -> "gui.astral_craft.creator.color.green";
+                default -> "gui.astral_craft.creator.color.blue";
+            };
+            graphics.text(this.font, Component.translatable(key), layout.tabContentX(), sliderY + channel * 16 + 3, 0xFFBBC7D7);
+            int barX = layout.tabContentX() + 18;
+            int barW = Math.max(40, layout.tabContentW() - 74);
+            int barY = sliderY + channel * 16 + 3;
+            graphics.fill(barX, barY, barX + barW, barY + 8, 0xFF252936);
+            int value = control.channel(channel);
+            int fillColor = switch (channel) { case 0 -> 0xFFE35454; case 1 -> 0xFF54C96A; default -> 0xFF5A75E8; };
+            int fillW = Math.round(barW * value / 255.0F);
+            graphics.fill(barX, barY, barX + fillW, barY + 8, fillColor);
+            int knobX = barX + Math.round((barW - 2) * value / 255.0F);
+            graphics.fill(knobX, barY - 2, knobX + 2, barY + 10, 0xFFFFFFFF);
+            graphics.text(this.font, Component.literal(Integer.toString(value)), barX + barW + 5, barY, 0xFFD7E4F2);
+        }
+        return y + 88;
     }
 
     private void renderAppearanceTab(GuiGraphicsExtractor graphics, EditorLayout layout, int mouseX, int mouseY) {
@@ -385,6 +604,7 @@ public class AstralDataEditorScreen extends Screen {
         EditorLayout layout = this.layout();
         double mouseX = event.x();
         double mouseY = event.y();
+        if (this.handleRegistrySuggestionClick(mouseX, mouseY)) return true;
         if (this.isInside(mouseX, mouseY, layout.topCloseX(), layout.topCloseY(), layout.topCloseW(), 16)) {
             this.onClose();
             return true;
@@ -404,12 +624,39 @@ public class AstralDataEditorScreen extends Screen {
 
     private boolean handleTabClick(EditorLayout layout, double mouseX, double mouseY) {
         if (this.tab == EditorTab.EVENT) {
-            int targetY = this.tabStartY(layout) + 78;
+            for (EffectDraft draft : this.eventEffects) if (draft.handleSpecialClick(this, mouseX, mouseY)) return true;
+            int start = this.tabStartY(layout);
+            int keyY = start + 78;
+            int readW = Math.max(54, layout.halfW() / 3);
+            if (this.isTabControlVisible(layout, keyY, FIELD_HEIGHT) && this.isInside(mouseX, mouseY, layout.leftX() + layout.halfW() - readW, keyY, readW, FIELD_HEIGHT)) {
+                this.readLocalization(this.eventNameKeyBox, this.eventNameBox);
+                return true;
+            }
+            if (this.isTabControlVisible(layout, keyY, FIELD_HEIGHT) && this.isInside(mouseX, mouseY, layout.rightX() + layout.halfW() - readW, keyY, readW, FIELD_HEIGHT)) {
+                this.readLocalization(this.eventDescriptionKeyBox, this.eventDescriptionBox);
+                return true;
+            }
+            int targetY = start + 112;
             if (this.isTabControlVisible(layout, targetY, FIELD_HEIGHT)
                     && this.isInside(mouseX, mouseY, layout.eventMetaX(3), targetY, layout.eventMetaW(), FIELD_HEIGHT)) {
                 this.eventTarget = this.eventTarget.next();
                 return true;
             }
+        } else if (this.tab == EditorTab.CHARACTER_SKIN) {
+            int start = this.tabStartY(layout);
+            int readY = start + 44;
+            if (this.isTabControlVisible(layout, readY, FIELD_HEIGHT) && this.isInside(mouseX, mouseY, layout.rightX(), readY, layout.halfW(), FIELD_HEIGHT)) {
+                this.readLocalization(this.skinNameKeyBox, this.skinNameBox);
+                return true;
+            }
+        } else if (this.tab == EditorTab.SKIN_RARITY) {
+            int start = this.tabStartY(layout);
+            int readY = start + 44;
+            if (this.isTabControlVisible(layout, readY, FIELD_HEIGHT) && this.isInside(mouseX, mouseY, layout.rightX(), readY, layout.halfW(), FIELD_HEIGHT)) {
+                this.readLocalization(this.rarityNameKeyBox, this.rarityNameBox);
+                return true;
+            }
+            return this.handleColorClick(layout, mouseX, mouseY);
         } else if (this.tab == EditorTab.APPEARANCE) {
             int start = this.tabStartY(layout);
             if (this.isTabControlVisible(layout, start + 44, FIELD_HEIGHT)
@@ -437,6 +684,7 @@ public class AstralDataEditorScreen extends Screen {
                 return true;
             }
         }
+
         return false;
     }
 
@@ -446,6 +694,10 @@ public class AstralDataEditorScreen extends Screen {
 
     @Override
     public boolean mouseDragged(@NonNull MouseButtonEvent event, double dragX, double dragY) {
+        if (event.button() == 0 && this.activeColorControl() != null) {
+            this.updateActiveColor(this.layout(), event.x());
+            return true;
+        }
         if (event.button() == 0 && this.tabScrollbarDragging) {
             this.updateTabScrollFromMouse(this.layout(), event.y());
             return true;
@@ -455,6 +707,10 @@ public class AstralDataEditorScreen extends Screen {
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
+        if (event.button() == 0 && this.activeColorControl() != null) {
+            this.clearColorDragging();
+            return true;
+        }
         if (event.button() == 0 && this.tabScrollbarDragging) {
             this.tabScrollbarDragging = false;
             return true;
@@ -534,23 +790,26 @@ public class AstralDataEditorScreen extends Screen {
     }
 
     private int eventContentHeight(EditorLayout layout) {
-        int y = 3 + 34 + 34 + 36 + this.eventToggleHeight() + EVENT_SECTION_GAP;
+        int y = 3 + 34 + 34 + 34 + 36 + this.eventToggleHeight() + EVENT_SECTION_GAP;
         y = this.conditionSectionEnd(layout, y);
         y += EVENT_SECTION_GAP;
         y = this.effectSectionEnd(layout, y, false);
         y += EVENT_SECTION_GAP;
         y = this.effectSectionEnd(layout, y, true);
+        if (this.status != null && !this.status.getString().isBlank()) {
+            y += 6 + this.wrappedTextHeight(this.status, layout.tabContentW());
+        }
         return y + 4;
     }
 
     private int skinContentHeight(EditorLayout layout) {
         int checkboxHeight = this.skinUnlockedCheckbox == null ? FIELD_HEIGHT : this.skinUnlockedCheckbox.getHeight();
-        return 3 + 34 * 3 + Math.max(FIELD_HEIGHT, checkboxHeight) + 8
+        return 3 + 34 * 5 + Math.max(FIELD_HEIGHT, checkboxHeight) + 8
                 + this.wrappedTextHeight(Component.translatable("gui.astral_craft.creator.skin.help"), layout.tabContentW()) + 4;
     }
 
     private int rarityContentHeight(EditorLayout layout) {
-        return 3 + 34 * 2 + this.wrappedTextHeight(Component.translatable("gui.astral_craft.creator.rarity.help"), layout.tabContentW()) + 4;
+        return 3 + 34 + 38 + 88 * 3 + this.wrappedTextHeight(Component.translatable("gui.astral_craft.creator.rarity.help"), layout.tabContentW()) + 8;
     }
 
     private int appearanceContentHeight(EditorLayout layout) {
@@ -569,6 +828,20 @@ public class AstralDataEditorScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (!this.registrySuggestions.isEmpty()) {
+            if (event.key() == GLFW.GLFW_KEY_DOWN) {
+                this.registrySuggestionIndex = (this.registrySuggestionIndex + 1) % this.registrySuggestions.size();
+                return true;
+            }
+            if (event.key() == GLFW.GLFW_KEY_UP) {
+                this.registrySuggestionIndex = (this.registrySuggestionIndex - 1 + this.registrySuggestions.size()) % this.registrySuggestions.size();
+                return true;
+            }
+            if (event.key() == GLFW.GLFW_KEY_TAB || event.key() == GLFW.GLFW_KEY_ENTER) {
+                this.applyRegistrySuggestion(this.registrySuggestions.get(this.registrySuggestionIndex));
+                return true;
+            }
+        }
         if (event.key() == GLFW.GLFW_KEY_ESCAPE) {
             this.onClose();
             return true;
@@ -598,15 +871,175 @@ public class AstralDataEditorScreen extends Screen {
                 start = Path.of(this.appearanceSourceBox.getValue()).toAbsolutePath().normalize();
             } catch (RuntimeException ignored) {}
         }
+
         this.minecraft.setScreen(AstralFileBrowserScreen.file(this, start, this.appearanceType.extensions(), path -> {
             this.appearanceSource = path;
             if (this.appearanceSourceBox != null) this.appearanceSourceBox.setValue(path.toString());
             if (this.appearanceNameBox != null && (this.appearanceNameBox.getValue().isBlank() || this.appearanceNameBox.getValue().equals("custom"))) {
                 String filename = path.getFileName().toString();
                 int dot = filename.lastIndexOf('.');
-                this.appearanceNameBox.setValue(dot > 0 ? filename.substring(0, dot) : filename);
+                String rawName = dot > 0 ? filename.substring(0, dot) : filename;
+                String safeName = this.safeResourceName(rawName);
+                this.appearanceNameBox.setValue(safeName);
+                if (!safeName.equals(rawName)) {
+                    this.status = Component.translatable("gui.astral_craft.creator.appearance.filename_normalized", rawName, safeName);
+                    this.statusError = false;
+                }
             }
         }));
+    }
+
+    private void openInventoryItemPicker(EffectDraft draft) {
+        this.minecraft.setScreen(new AstralInventoryItemPickerScreen(this, stack -> {
+            draft.addInventoryStack(stack);
+            this.status = Component.translatable("gui.astral_craft.creator.item.added");
+            this.statusError = false;
+            this.onDynamicLayoutChanged();
+        }));
+    }
+
+    private JsonObject encodeGiveItemEffect(EffectDraft draft) throws EditorException {
+        JsonArray items = new JsonArray();
+        for (ItemStack stack : draft.exportStacks(this)) {
+            ItemStackTemplate template = ItemStackTemplate.fromNonEmptyStack(stack);
+            var encoded = this.minecraft.getConnection() != null
+                    ? ItemStackTemplate.CODEC.encodeStart(RegistryOps.create(JsonOps.INSTANCE, this.minecraft.getConnection().registryAccess()), template).result()
+                    : ItemStackTemplate.CODEC.encodeStart(JsonOps.INSTANCE, template).result();
+            if (encoded.isEmpty()) throw new EditorException("gui.astral_craft.creator.error.item_stack_encode");
+            items.add(encoded.get());
+        }
+        JsonObject result = typed(AstralCraft.prefix("give_item"));
+        result.add("items", items);
+        return result;
+    }
+
+    private Component fieldContext(EditorTab tab, String fieldKey) {
+        return Component.translatable(tab.translationKey).append(" / ").append(Component.translatable(fieldKey));
+    }
+
+    private Component eventContext(String itemKey, String sectionKey) {
+        return Component.translatable(EditorTab.EVENT.translationKey).append(" / ")
+                .append(Component.translatable(sectionKey)).append(" / ").append(Component.translatable(itemKey));
+    }
+
+    private <T> T validateField(EditorTab tab, String fieldKey, EditorSupplier<T> supplier) throws EditorException {
+        try {
+            return supplier.get();
+        } catch (EditorException exception) {
+            throw exception.withContext(this.fieldContext(tab, fieldKey));
+        }
+    }
+
+    private void setEditorError(EditorException exception) {
+        this.statusError = true;
+        Component detail = Component.translatable(exception.translationKey, exception.args);
+        this.status = exception.context == null ? detail
+                : Component.translatable("gui.astral_craft.creator.error.field_context", exception.context, detail);
+    }
+
+    private void validateSelectedContent() throws EditorException, IOException {
+        if (this.exportEvent) this.validateEventForm();
+        if (this.exportSkin) this.validateSkinForm();
+        if (this.exportRarity) this.validateRarityForm();
+        if (this.exportAppearance) this.validateAppearanceForm();
+    }
+
+    private void validateEventForm() throws EditorException {
+        this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.event.id",
+                () -> this.requireIdentifier(this.eventIdBox, "gui.astral_craft.creator.error.event_id"));
+        this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.event.name",
+                () -> this.requireText(this.eventNameBox, "gui.astral_craft.creator.error.display_name"));
+        this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.event.description",
+                () -> this.requireText(this.eventDescriptionBox, "gui.astral_craft.creator.error.description"));
+        this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.event.texture",
+                () -> this.requireIdentifier(this.eventTextureBox, "gui.astral_craft.creator.error.texture"));
+        this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.event.cooldown",
+                () -> this.requireInt(this.eventCooldownBox, 0, Integer.MAX_VALUE, "gui.astral_craft.creator.error.cooldown"));
+        this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.event.chance",
+                () -> this.requireDouble(this.eventChanceBox, 0.0D, 1.0D, "gui.astral_craft.creator.error.chance"));
+        this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.event.radius",
+                () -> this.requireDouble(this.eventRadiusBox, 1.0D, 1024.0D, "gui.astral_craft.creator.error.radius"));
+        if (!this.eventNameKeyBox.getValue().isBlank()) this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.localization_name_key",
+                () -> this.localizationKeyOrDefault(this.eventNameKeyBox, "unused"));
+        if (!this.eventDescriptionKeyBox.getValue().isBlank()) this.validateField(EditorTab.EVENT, "gui.astral_craft.creator.localization_description_key",
+                () -> this.localizationKeyOrDefault(this.eventDescriptionKeyBox, "unused"));
+
+        for (ConditionDraft draft : this.eventConditions) draft.toJson(this);
+        int selectedEffects = 0;
+        for (EffectDraft draft : this.eventEffects) {
+            if (!draft.selected) continue;
+            selectedEffects++;
+            draft.toJson(this);
+            if (!draft.compatibleWith(this.eventTarget)) {
+                throw new EditorException("gui.astral_craft.creator.error.incompatible_target")
+                        .withContext(this.eventContext(draft.type.translationKey,
+                                draft.type.boardOnly() ? "gui.astral_craft.creator.event.board_effects" : "gui.astral_craft.creator.event.effects"));
+            }
+        }
+        if (selectedEffects == 0) {
+            throw new EditorException("gui.astral_craft.creator.error.effect_required")
+                    .withContext(this.fieldContext(EditorTab.EVENT, "gui.astral_craft.creator.event.effects"));
+        }
+    }
+
+    private void validateSkinForm() throws EditorException {
+        this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.skin.entry_id",
+                () -> this.requireIdentifier(this.skinEntryIdBox, "gui.astral_craft.creator.error.skin_entry_id"));
+        this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.skin.name",
+                () -> this.requireText(this.skinNameBox, "gui.astral_craft.creator.error.display_name"));
+        this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.skin.character",
+                () -> this.requireIdentifier(this.skinCharacterBox, "gui.astral_craft.creator.error.character_id"));
+        this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.skin.skin_id",
+                () -> this.requireSimplePath(this.skinIdBox, "gui.astral_craft.creator.error.skin_id"));
+        this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.skin.texture",
+                () -> this.requireIdentifier(this.skinTextureBox, "gui.astral_craft.creator.error.texture"));
+        this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.skin.rarity",
+                () -> this.requireText(this.skinRarityBox, "gui.astral_craft.creator.error.rarity"));
+        if (!this.skinNameKeyBox.getValue().isBlank()) this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.localization_key",
+                () -> this.localizationKeyOrDefault(this.skinNameKeyBox, "unused"));
+        if (!this.skinModelBox.getValue().isBlank()) this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.skin.model",
+                () -> this.requireIdentifier(this.skinModelBox, "gui.astral_craft.creator.error.model_id"));
+        if (!this.skinAnimationSetBox.getValue().isBlank()) this.validateField(EditorTab.CHARACTER_SKIN, "gui.astral_craft.creator.skin.animation_set",
+                () -> this.requireIdentifier(this.skinAnimationSetBox, "gui.astral_craft.creator.error.animation_set_id"));
+    }
+
+    private void validateRarityForm() throws EditorException {
+        this.validateField(EditorTab.SKIN_RARITY, "gui.astral_craft.creator.rarity.id",
+                () -> this.requireIdentifier(this.rarityIdBox, "gui.astral_craft.creator.error.rarity_id"));
+        this.validateField(EditorTab.SKIN_RARITY, "gui.astral_craft.creator.rarity.name",
+                () -> this.requireText(this.rarityNameBox, "gui.astral_craft.creator.error.display_name"));
+        if (!this.rarityNameKeyBox.getValue().isBlank()) this.validateField(EditorTab.SKIN_RARITY, "gui.astral_craft.creator.localization_key",
+                () -> this.localizationKeyOrDefault(this.rarityNameKeyBox, "unused"));
+        this.validateField(EditorTab.SKIN_RARITY, "gui.astral_craft.creator.rarity.border",
+                () -> this.requireColor(this.rarityBorderBox, "gui.astral_craft.creator.error.color"));
+        this.validateField(EditorTab.SKIN_RARITY, "gui.astral_craft.creator.rarity.badge",
+                () -> this.requireColor(this.rarityBadgeBox, "gui.astral_craft.creator.error.color"));
+        this.validateField(EditorTab.SKIN_RARITY, "gui.astral_craft.creator.rarity.text",
+                () -> this.requireColor(this.rarityTextBox, "gui.astral_craft.creator.error.color"));
+    }
+
+    private void validateAppearanceForm() throws EditorException, IOException {
+        this.validateField(EditorTab.APPEARANCE, "gui.astral_craft.creator.appearance.namespace", () -> this.requireNamespace(this.appearanceNamespaceBox));
+        this.validateField(EditorTab.APPEARANCE, "gui.astral_craft.creator.appearance.name",
+                () -> this.requireSimplePath(this.appearanceNameBox, "gui.astral_craft.creator.error.appearance_name"));
+        Path source = this.validateField(EditorTab.APPEARANCE, "gui.astral_craft.creator.appearance.source",
+                () -> this.requirePath(this.appearanceSourceBox, "gui.astral_craft.creator.error.appearance_source"));
+        if (!Files.isRegularFile(source)) {
+            throw new EditorException("gui.astral_craft.creator.error.appearance_source")
+                    .withContext(this.fieldContext(EditorTab.APPEARANCE, "gui.astral_craft.creator.appearance.source"));
+        }
+        String sourceName = source.getFileName().toString();
+        int dot = sourceName.lastIndexOf('.');
+        String extension = dot >= 0 ? sourceName.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
+        if (!this.appearanceType.accepts(extension)) {
+            throw new EditorException("gui.astral_craft.creator.error.appearance_source")
+                    .withContext(this.fieldContext(EditorTab.APPEARANCE, "gui.astral_craft.creator.appearance.source"));
+        }
+        try {
+            this.validateImageSource(source, extension);
+        } catch (EditorException exception) {
+            throw exception.withContext(this.fieldContext(EditorTab.APPEARANCE, "gui.astral_craft.creator.appearance.source"));
+        }
     }
 
     private void exportSelected() {
@@ -616,15 +1049,19 @@ public class AstralDataEditorScreen extends Screen {
             if (!this.exportEvent && !this.exportSkin && !this.exportRarity && !this.exportAppearance) {
                 throw new EditorException("gui.astral_craft.creator.error.export_selection");
             }
-            String packName = this.safePackName(this.requireText(this.packNameBox, "gui.astral_craft.creator.error.pack_name"));
-            if (this.exportRoot == null) throw new EditorException("gui.astral_craft.creator.error.export_root");
+            String packName = this.validateField(EditorTab.EXPORT, "gui.astral_craft.creator.pack_name",
+                    () -> this.safePackName(this.requireText(this.packNameBox, "gui.astral_craft.creator.error.pack_name")));
+            if (this.exportRoot == null) {
+                throw new EditorException("gui.astral_craft.creator.error.export_root")
+                        .withContext(this.fieldContext(EditorTab.EXPORT, "gui.astral_craft.creator.export_path"));
+            }
+            this.validateSelectedContent();
             Files.createDirectories(this.exportRoot);
             if (this.exportSeparate) this.exportSeparately(packName);
             else this.exportCombined(packName);
             this.status = Component.translatable("gui.astral_craft.creator.export_success", this.exportRoot.toString());
         } catch (EditorException exception) {
-            this.statusError = true;
-            this.status = Component.translatable(exception.translationKey, exception.args);
+            this.setEditorError(exception);
         } catch (IOException | SecurityException exception) {
             this.statusError = true;
             this.status = Component.translatable("gui.astral_craft.creator.error.io", exception.getClass().getSimpleName());
@@ -671,8 +1108,8 @@ public class AstralDataEditorScreen extends Screen {
             if (!draft.compatibleWith(this.eventTarget)) throw new EditorException("gui.astral_craft.creator.error.incompatible_target");
         }
 
-        String nameKey = "event." + id.getNamespace() + "." + id.getPath().replace('/', '.') + ".name";
-        String descriptionKey = "event." + id.getNamespace() + "." + id.getPath().replace('/', '.') + ".description";
+        String nameKey = this.localizationKeyOrDefault(this.eventNameKeyBox, "event." + id.getNamespace() + "." + id.getPath().replace('/', '.') + ".name");
+        String descriptionKey = this.localizationKeyOrDefault(this.eventDescriptionKeyBox, "event." + id.getNamespace() + "." + id.getPath().replace('/', '.') + ".description");
         JsonObject target = new JsonObject();
         target.addProperty("scope", this.eventTarget.id.toString());
         target.addProperty("radius", radius);
@@ -703,7 +1140,7 @@ public class AstralDataEditorScreen extends Screen {
         String skinId = this.requireSimplePath(this.skinIdBox, "gui.astral_craft.creator.error.skin_id");
         String displayName = this.requireText(this.skinNameBox, "gui.astral_craft.creator.error.display_name");
         String rarity = this.requireText(this.skinRarityBox, "gui.astral_craft.creator.error.rarity");
-        String nameKey = "character_skin." + entryId.getNamespace() + "." + entryId.getPath().replace('/', '.') + ".name";
+        String nameKey = this.localizationKeyOrDefault(this.skinNameKeyBox, "character_skin." + entryId.getNamespace() + "." + entryId.getPath().replace('/', '.') + ".name");
         JsonObject root = new JsonObject();
         root.addProperty("character", character.toString());
         root.addProperty("id", skinId);
@@ -711,6 +1148,8 @@ public class AstralDataEditorScreen extends Screen {
         root.addProperty("texture", texture.toString());
         root.addProperty("unlocked_by_default", this.skinUnlocked);
         root.addProperty("rarity", rarity);
+        if (!this.skinModelBox.getValue().isBlank()) root.addProperty("model", this.requireIdentifier(this.skinModelBox, "gui.astral_craft.creator.error.model_id").toString());
+        if (!this.skinAnimationSetBox.getValue().isBlank()) root.addProperty("animation_set", this.requireIdentifier(this.skinAnimationSetBox, "gui.astral_craft.creator.error.animation_set_id").toString());
         this.ensureDataPack(dataPack);
         Path file = dataPack.resolve("data").resolve(entryId.getNamespace()).resolve("astral_craft/character_skins").resolve(entryId.getPath() + ".json");
         this.writeJson(file, root);
@@ -725,7 +1164,7 @@ public class AstralDataEditorScreen extends Screen {
         int border = this.requireColor(this.rarityBorderBox, "gui.astral_craft.creator.error.color");
         int badge = this.requireColor(this.rarityBadgeBox, "gui.astral_craft.creator.error.color");
         int text = this.requireColor(this.rarityTextBox, "gui.astral_craft.creator.error.color");
-        String nameKey = "skin_rarity." + id.getNamespace() + "." + id.getPath().replace('/', '.') + ".name";
+        String nameKey = this.localizationKeyOrDefault(this.rarityNameKeyBox, "skin_rarity." + id.getNamespace() + "." + id.getPath().replace('/', '.') + ".name");
         JsonObject root = new JsonObject();
         root.addProperty("name_key", nameKey);
         root.addProperty("border_color", border);
@@ -751,10 +1190,95 @@ public class AstralDataEditorScreen extends Screen {
         int dot = sourceName.lastIndexOf('.');
         String extension = dot >= 0 ? sourceName.substring(dot + 1).toLowerCase(Locale.ROOT) : "";
         if (!this.appearanceType.accepts(extension)) throw new EditorException("gui.astral_craft.creator.error.appearance_source");
+        this.validateImageSource(source, extension);
         this.ensureResourcePack(resourcePack);
         Path target = resourcePack.resolve("assets").resolve(namespace).resolve(this.appearanceType.directory).resolve(name + "." + extension);
         Files.createDirectories(target.getParent());
         Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private void readLocalization(EditBox keyBox, EditBox valueBox) {
+        String key = keyBox == null ? "" : keyBox.getValue().trim();
+        if (key.isEmpty() || !Language.getInstance().has(key)) {
+            this.status = Component.translatable("gui.astral_craft.creator.localization_missing", key);
+            this.statusError = true;
+            return;
+        }
+        valueBox.setValue(Component.translatable(key).getString());
+        this.status = Component.translatable("gui.astral_craft.creator.localization_loaded", key);
+        this.statusError = false;
+    }
+
+    private String localizationKeyOrDefault(EditBox box, String fallback) throws EditorException {
+        if (box == null || box.getValue().isBlank()) return fallback;
+        String key = box.getValue().trim();
+        if (!key.matches("[a-z0-9_.\\-/]+")) throw new EditorException("gui.astral_craft.creator.error.localization_key");
+        return key;
+    }
+
+    private String safeResourceName(String value) {
+        String normalized = value == null ? "custom" : value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_.-]+", "_")
+                .replaceAll("_+", "_").replaceAll("^[._-]+|[._-]+$", "");
+        return normalized.isBlank() ? "custom" : normalized;
+    }
+
+    private void validateImageSource(Path source, String extension) throws IOException, EditorException {
+        if (Files.size(source) > 32L * 1024L * 1024L) throw new EditorException("gui.astral_craft.creator.error.image_file");
+        byte[] signature = new byte[8];
+        int read;
+        try (var input = Files.newInputStream(source)) {
+            read = input.read(signature);
+        }
+        if (read < 8) throw new EditorException("gui.astral_craft.creator.error.image_file");
+        boolean png = signature[0] == (byte) 0x89 && signature[1] == 0x50 && signature[2] == 0x4E && signature[3] == 0x47
+                && signature[4] == 0x0D && signature[5] == 0x0A && signature[6] == 0x1A && signature[7] == 0x0A;
+        boolean jpeg = signature[0] == (byte) 0xFF && signature[1] == (byte) 0xD8 && signature[2] == (byte) 0xFF;
+        if (("png".equals(extension) && !png) || (("jpg".equals(extension) || "jpeg".equals(extension)) && !jpeg)) {
+            throw new EditorException("gui.astral_craft.creator.error.image_file");
+        }
+    }
+
+    private boolean handleColorClick(EditorLayout layout, double mouseX, double mouseY) {
+        int y = this.tabStartY(layout) + 34 + 38;
+        RgbColorControl[] controls = {this.rarityBorderColor, this.rarityBadgeColor, this.rarityTextColor};
+        for (RgbColorControl control : controls) {
+            int sliderY = y + 36;
+            int barX = layout.tabContentX() + 18;
+            int barW = Math.max(40, layout.tabContentW() - 74);
+            for (int channel = 0; channel < 3; channel++) {
+                int barY = sliderY + channel * 16;
+                if (this.isTabControlVisible(layout, barY, 14) && this.isInside(mouseX, mouseY, barX, barY, barW, 14)) {
+                    control.draggingChannel = channel;
+                    this.updateActiveColor(layout, mouseX);
+                    return true;
+                }
+            }
+            y += 88;
+        }
+        return false;
+    }
+
+    private RgbColorControl activeColorControl() {
+        if (this.tab != EditorTab.SKIN_RARITY) return null;
+        for (RgbColorControl control : new RgbColorControl[]{this.rarityBorderColor, this.rarityBadgeColor, this.rarityTextColor}) {
+            if (control != null && control.draggingChannel >= 0) return control;
+        }
+        return null;
+    }
+
+    private void updateActiveColor(EditorLayout layout, double mouseX) {
+        RgbColorControl control = this.activeColorControl();
+        if (control == null) return;
+        int barX = layout.tabContentX() + 18;
+        int barW = Math.max(40, layout.tabContentW() - 74);
+        int value = Math.clamp((int) Math.round((mouseX - barX) * 255.0D / Math.max(1, barW)), 0, 255);
+        control.setChannel(control.draggingChannel, value);
+    }
+
+    private void clearColorDragging() {
+        for (RgbColorControl control : new RgbColorControl[]{this.rarityBorderColor, this.rarityBadgeColor, this.rarityTextColor}) {
+            if (control != null) control.draggingChannel = -1;
+        }
     }
 
     private void ensureDataPack(Path dataPack) throws IOException {
@@ -804,11 +1328,7 @@ public class AstralDataEditorScreen extends Screen {
                 if (loaded != null) root = loaded;
             } catch (RuntimeException ignored) {}
         }
-
-        for (int index = 0; index + 1 < entries.length; index += 2) {
-            root.addProperty(entries[index], entries[index + 1]);
-        }
-
+        for (int index = 0; index + 1 < entries.length; index += 2) root.addProperty(entries[index], entries[index + 1]);
         this.writeJson(file, root);
     }
 
@@ -823,10 +1343,7 @@ public class AstralDataEditorScreen extends Screen {
     private String safePackName(String value) throws EditorException {
         String normalized = value.strip().replaceAll("[^A-Za-z0-9._-]+", "_");
         while (normalized.startsWith(".")) normalized = normalized.substring(1);
-        if (normalized.isBlank() || normalized.equals("..")) {
-            throw new EditorException("gui.astral_craft.creator.error.pack_name");
-        }
-
+        if (normalized.isBlank() || normalized.equals("..")) throw new EditorException("gui.astral_craft.creator.error.pack_name");
         return normalized;
     }
 
@@ -842,10 +1359,7 @@ public class AstralDataEditorScreen extends Screen {
     private String requireNamespace(EditBox box) throws EditorException {
         String value = this.requireText(box, "gui.astral_craft.creator.error.namespace").toLowerCase(Locale.ROOT);
         Identifier test = Identifier.tryParse(value + ":value");
-        if (test == null || !test.getNamespace().equals(value)) {
-            throw new EditorException("gui.astral_craft.creator.error.namespace");
-        }
-
+        if (test == null || !test.getNamespace().equals(value)) throw new EditorException("gui.astral_craft.creator.error.namespace");
         return value;
     }
 
@@ -859,6 +1373,12 @@ public class AstralDataEditorScreen extends Screen {
     private Identifier requireIdentifier(EditBox box, String key) throws EditorException {
         Identifier value = Identifier.tryParse(this.requireText(box, key));
         if (value == null || value.getPath().contains("..")) throw new EditorException(key);
+        return value;
+    }
+
+    private Identifier requireRegistryIdentifier(EditBox box, RegistrySuggestionKind kind, String key) throws EditorException {
+        Identifier value = this.requireIdentifier(box, key);
+        if (!kind.contains(this, value)) throw new EditorException("gui.astral_craft.creator.error.unknown_registry_entry", value.toString());
         return value;
     }
 
@@ -929,6 +1449,28 @@ public class AstralDataEditorScreen extends Screen {
         return List.copyOf(values);
     }
 
+    private List<Identifier> requireRegistryCsv(EditBox box, RegistrySuggestionKind kind, String key) throws EditorException {
+        List<Identifier> values = new ArrayList<>();
+        for (String raw : this.requireCsv(box, key, true)) {
+            Identifier value = Identifier.tryParse(raw);
+            if (value == null || !kind.contains(this, value)) throw new EditorException("gui.astral_craft.creator.error.unknown_registry_entry", raw);
+            values.add(value);
+        }
+        return List.copyOf(values);
+    }
+
+    private int[] requireIntTriple(EditBox box, String key) throws EditorException {
+        String[] parts = this.requireText(box, key).trim().split("[ ,]+", -1);
+        if (parts.length != 3) throw new EditorException(key);
+        int[] values = new int[3];
+        try {
+            for (int index = 0; index < values.length; index++) values[index] = Integer.parseInt(parts[index]);
+        } catch (NumberFormatException exception) {
+            throw new EditorException(key);
+        }
+        return values;
+    }
+
     private void updateWidgets(EditorLayout layout) {
         if (this.packNameBox == null) return;
         this.positionEventWidgets(layout);
@@ -946,6 +1488,10 @@ public class AstralDataEditorScreen extends Screen {
         y += 34;
         this.positionTabBox(this.eventDescriptionBox, layout.leftX(), y + 10, layout.halfW(), event, layout);
         this.positionTabBox(this.eventTextureBox, layout.rightX(), y + 10, layout.halfW(), event, layout);
+        y += 34;
+        int readW = Math.max(54, layout.halfW() / 3);
+        this.positionTabBox(this.eventNameKeyBox, layout.leftX(), y + 10, Math.max(1, layout.halfW() - readW - GAP), event, layout);
+        this.positionTabBox(this.eventDescriptionKeyBox, layout.rightX(), y + 10, Math.max(1, layout.halfW() - readW - GAP), event, layout);
         y += 34;
         this.positionTabBox(this.eventCooldownBox, layout.eventMetaX(0), y + 10, layout.eventMetaW(), event, layout);
         this.positionTabBox(this.eventChanceBox, layout.eventMetaX(1), y + 10, layout.eventMetaW(), event, layout);
@@ -1001,11 +1547,16 @@ public class AstralDataEditorScreen extends Screen {
         this.positionTabBox(this.skinEntryIdBox, layout.leftX(), y + 10, layout.halfW(), visible, layout);
         this.positionTabBox(this.skinNameBox, layout.rightX(), y + 10, layout.halfW(), visible, layout);
         y += 34;
+        this.positionTabBox(this.skinNameKeyBox, layout.leftX(), y + 10, layout.halfW(), visible, layout);
+        y += 34;
         this.positionTabBox(this.skinCharacterBox, layout.leftX(), y + 10, layout.halfW(), visible, layout);
         this.positionTabBox(this.skinIdBox, layout.rightX(), y + 10, layout.halfW(), visible, layout);
         y += 34;
         this.positionTabBox(this.skinTextureBox, layout.leftX(), y + 10, layout.halfW(), visible, layout);
         this.positionTabBox(this.skinRarityBox, layout.rightX(), y + 10, layout.halfW(), visible, layout);
+        y += 34;
+        this.positionTabBox(this.skinModelBox, layout.leftX(), y + 10, layout.halfW(), visible, layout);
+        this.positionTabBox(this.skinAnimationSetBox, layout.rightX(), y + 10, layout.halfW(), visible, layout);
         y += 34;
         this.positionTabCheckbox(this.skinUnlockedCheckbox, layout.tabContentX(), y, layout.halfW(), visible, layout);
     }
@@ -1016,9 +1567,13 @@ public class AstralDataEditorScreen extends Screen {
         this.positionTabBox(this.rarityIdBox, layout.leftX(), y + 10, layout.halfW(), visible, layout);
         this.positionTabBox(this.rarityNameBox, layout.rightX(), y + 10, layout.halfW(), visible, layout);
         y += 34;
-        this.positionTabBox(this.rarityBorderBox, layout.rarityColorX(0), y + 10, layout.rarityColorW(), visible, layout);
-        this.positionTabBox(this.rarityBadgeBox, layout.rarityColorX(1), y + 10, layout.rarityColorW(), visible, layout);
-        this.positionTabBox(this.rarityTextBox, layout.rarityColorX(2), y + 10, layout.rarityColorW(), visible, layout);
+        this.positionTabBox(this.rarityNameKeyBox, layout.leftX(), y + 10, layout.halfW(), visible, layout);
+        y += 38;
+        this.positionTabBox(this.rarityBorderBox, layout.tabContentX(), y + 10, Math.max(80, layout.tabContentW() - 54), visible, layout);
+        y += 88;
+        this.positionTabBox(this.rarityBadgeBox, layout.tabContentX(), y + 10, Math.max(80, layout.tabContentW() - 54), visible, layout);
+        y += 88;
+        this.positionTabBox(this.rarityTextBox, layout.tabContentX(), y + 10, Math.max(80, layout.tabContentW() - 54), visible, layout);
     }
 
     private void positionAppearanceWidgets(EditorLayout layout) {
@@ -1208,8 +1763,24 @@ public class AstralDataEditorScreen extends Screen {
         if (box == null) return;
         box.setPosition(x, y);
         box.setWidth(Math.max(1, width));
+        this.updateBoxHint(box);
         box.setVisible(visible);
         box.active = visible;
+    }
+
+    private void updateBoxHint(EditBox box) {
+        Component hint = this.boxHints.get(box);
+        if (hint == null) return;
+        int width = Math.max(1, box.getInnerWidth());
+        String text = hint.getString();
+        if (this.font.width(text) <= width) {
+            box.setHint(hint);
+            return;
+        }
+        String suffix = "...";
+        int textWidth = Math.max(1, width - this.font.width(suffix));
+        String clipped = this.font.plainSubstrByWidth(text, textWidth);
+        box.setHint(Component.literal(clipped + suffix).withStyle(hint.getStyle()));
     }
 
     private void positionCheckbox(Checkbox checkbox, int x, int y, int width, boolean visible) {
@@ -1242,9 +1813,32 @@ public class AstralDataEditorScreen extends Screen {
         if (this.maxTabScroll(layout) > 0
                 && this.isInside(mouseX, mouseY, layout.tabScrollbarX(), layout.tabViewportTop(), layout.tabScrollbarW(), layout.tabViewportH())) return true;
         if (this.tab == EditorTab.EVENT) {
-            int targetY = this.tabStartY(layout) + 78;
-            return this.isTabControlVisible(layout, targetY, FIELD_HEIGHT)
+            for (EffectDraft draft : this.eventEffects) if (draft.specialHovered(this, mouseX, mouseY)) return true;
+            int start = this.tabStartY(layout);
+            int keyY = start + 78;
+            int readW = Math.max(54, layout.halfW() / 3);
+            int targetY = start + 112;
+            return this.isTabControlVisible(layout, keyY, FIELD_HEIGHT)
+                    && (this.isInside(mouseX, mouseY, layout.leftX() + layout.halfW() - readW, keyY, readW, FIELD_HEIGHT)
+                    || this.isInside(mouseX, mouseY, layout.rightX() + layout.halfW() - readW, keyY, readW, FIELD_HEIGHT))
+                    || this.isTabControlVisible(layout, targetY, FIELD_HEIGHT)
                     && this.isInside(mouseX, mouseY, layout.eventMetaX(3), targetY, layout.eventMetaW(), FIELD_HEIGHT);
+        }
+        if (this.tab == EditorTab.CHARACTER_SKIN || this.tab == EditorTab.SKIN_RARITY) {
+            int readY = this.tabStartY(layout) + 44;
+            if (this.isTabControlVisible(layout, readY, FIELD_HEIGHT)
+                    && this.isInside(mouseX, mouseY, layout.rightX(), readY, layout.halfW(), FIELD_HEIGHT)) return true;
+            if (this.tab == EditorTab.SKIN_RARITY) {
+                int y = this.tabStartY(layout) + 34 + 38;
+                int barX = layout.tabContentX() + 18;
+                int barW = Math.max(40, layout.tabContentW() - 74);
+                for (int control = 0; control < 3; control++) {
+                    int sliderY = y + control * 88 + 36;
+                    for (int channel = 0; channel < 3; channel++) {
+                        if (this.isInside(mouseX, mouseY, barX, sliderY + channel * 16, barW, 14)) return true;
+                    }
+                }
+            }
         }
         if (this.tab == EditorTab.APPEARANCE) {
             int start = this.tabStartY(layout);
@@ -1339,7 +1933,7 @@ public class AstralDataEditorScreen extends Screen {
                 new DraftDefaults("minecraft:overworld", "false", ""), (screen, a, b, c) -> {
             JsonObject result = typed(AstralCraft.prefix("dimension"));
             JsonArray values = new JsonArray();
-            for (String value : screen.requireCsv(a, "gui.astral_craft.creator.error.identifier_list", true)) values.add(value);
+            for (Identifier value : screen.requireRegistryCsv(a, RegistrySuggestionKind.DIMENSION, "gui.astral_craft.creator.error.identifier_list")) values.add(value.toString());
             result.add("dimensions", values);
             result.addProperty("inverted", screen.requireBoolean(b, "gui.astral_craft.creator.error.boolean"));
             return result;
@@ -1361,7 +1955,7 @@ public class AstralDataEditorScreen extends Screen {
         HAS_ITEM("gui.astral_craft.creator.condition.has_item", "gui.astral_craft.creator.arg.item", "gui.astral_craft.creator.arg.count", "gui.astral_craft.creator.arg.inverted",
                 new DraftDefaults("minecraft:apple", "1", "false"), (screen, a, b, c) -> {
             JsonObject result = typed(AstralCraft.prefix("has_item"));
-            result.addProperty("id", screen.requireIdentifier(a, "gui.astral_craft.creator.error.identifier").toString());
+            result.addProperty("id", screen.requireRegistryIdentifier(a, RegistrySuggestionKind.ITEM, "gui.astral_craft.creator.error.identifier").toString());
             result.addProperty("count", screen.requireInt(b, 1, Integer.MAX_VALUE, "gui.astral_craft.creator.error.number"));
             result.addProperty("inverted", screen.requireBoolean(c, "gui.astral_craft.creator.error.boolean"));
             return result;
@@ -1369,7 +1963,7 @@ public class AstralDataEditorScreen extends Screen {
         HAS_EFFECT("gui.astral_craft.creator.condition.has_effect", "gui.astral_craft.creator.arg.effect", "gui.astral_craft.creator.arg.inverted", "",
                 new DraftDefaults("minecraft:speed", "false", ""), (screen, a, b, c) -> {
             JsonObject result = typed(AstralCraft.prefix("has_effect"));
-            result.addProperty("effect", screen.requireIdentifier(a, "gui.astral_craft.creator.error.identifier").toString());
+            result.addProperty("effect", screen.requireRegistryIdentifier(a, RegistrySuggestionKind.MOB_EFFECT, "gui.astral_craft.creator.error.identifier").toString());
             result.addProperty("inverted", screen.requireBoolean(b, "gui.astral_craft.creator.error.boolean"));
             return result;
         }),
@@ -1392,9 +1986,22 @@ public class AstralDataEditorScreen extends Screen {
                 new DraftDefaults("minecraft:zombie", "false", ""), (screen, a, b, c) -> {
             JsonObject result = typed(AstralCraft.prefix("entity_type"));
             JsonArray values = new JsonArray();
-            for (String value : screen.requireCsv(a, "gui.astral_craft.creator.error.identifier_list", true)) values.add(value);
+            for (Identifier value : screen.requireRegistryCsv(a, RegistrySuggestionKind.ENTITY_TYPE, "gui.astral_craft.creator.error.identifier_list")) values.add(value.toString());
             result.add("entity_types", values);
             result.addProperty("inverted", screen.requireBoolean(b, "gui.astral_craft.creator.error.boolean"));
+            return result;
+        }),
+        BLOCK_AT("gui.astral_craft.creator.condition.block_at", "gui.astral_craft.creator.arg.blocks", "gui.astral_craft.creator.arg.offset_xyz", "gui.astral_craft.creator.arg.inverted",
+                new DraftDefaults("minecraft:stone", "0 0 0", "false"), (screen, a, b, c) -> {
+            JsonObject result = typed(AstralCraft.prefix("block_at"));
+            JsonArray blocks = new JsonArray();
+            for (Identifier value : screen.requireRegistryCsv(a, RegistrySuggestionKind.BLOCK, "gui.astral_craft.creator.error.identifier_list")) blocks.add(value.toString());
+            int[] offset = screen.requireIntTriple(b, "gui.astral_craft.creator.error.offset_xyz");
+            result.add("blocks", blocks);
+            result.addProperty("offset_x", offset[0]);
+            result.addProperty("offset_y", offset[1]);
+            result.addProperty("offset_z", offset[2]);
+            result.addProperty("inverted", screen.requireBoolean(c, "gui.astral_craft.creator.error.boolean"));
             return result;
         }),
         ENTITY_CATEGORY("gui.astral_craft.creator.condition.entity_category", "gui.astral_craft.creator.arg.categories", "gui.astral_craft.creator.arg.inverted", "",
@@ -1428,16 +2035,16 @@ public class AstralDataEditorScreen extends Screen {
     private enum EffectType {
         NONE("gui.astral_craft.creator.effect.none", "", "", "", new DraftDefaults("", "", ""), target -> true, (screen, a, b, c) -> null),
         GIVE_ITEM("gui.astral_craft.creator.effect.give_item", "gui.astral_craft.creator.arg.item", "gui.astral_craft.creator.arg.count", "",
-                new DraftDefaults("minecraft:apple", "1", ""), TargetScope::playersOnly, (screen, a, b, c) -> {
+                new DraftDefaults("", "1", ""), TargetScope::playersOnly, (screen, a, b, c) -> {
             JsonObject result = typed(AstralCraft.prefix("give_item"));
-            result.addProperty("id", screen.requireIdentifier(a, "gui.astral_craft.creator.error.identifier").toString());
+            result.addProperty("id", screen.requireRegistryIdentifier(a, RegistrySuggestionKind.ITEM, "gui.astral_craft.creator.error.identifier").toString());
             result.addProperty("count", screen.requireInt(b, 1, Integer.MAX_VALUE, "gui.astral_craft.creator.error.number"));
             return result;
         }),
         DROP_ITEM("gui.astral_craft.creator.effect.drop_item", "gui.astral_craft.creator.arg.item", "gui.astral_craft.creator.arg.count", "",
                 new DraftDefaults("minecraft:apple", "1", ""), target -> true, (screen, a, b, c) -> {
             JsonObject result = typed(AstralCraft.prefix("drop_item"));
-            result.addProperty("id", screen.requireIdentifier(a, "gui.astral_craft.creator.error.identifier").toString());
+            result.addProperty("id", screen.requireRegistryIdentifier(a, RegistrySuggestionKind.ITEM, "gui.astral_craft.creator.error.identifier").toString());
             result.addProperty("count", screen.requireInt(b, 1, Integer.MAX_VALUE, "gui.astral_craft.creator.error.number"));
             return result;
         }),
@@ -1475,7 +2082,7 @@ public class AstralDataEditorScreen extends Screen {
         MOB_EFFECT("gui.astral_craft.creator.effect.mob_effect", "gui.astral_craft.creator.arg.effect", "gui.astral_craft.creator.arg.duration", "gui.astral_craft.creator.arg.amplifier",
                 new DraftDefaults("minecraft:speed", "200", "0"), target -> true, (screen, a, b, c) -> {
             JsonObject result = typed(AstralCraft.prefix("effect"));
-            result.addProperty("effect", screen.requireIdentifier(a, "gui.astral_craft.creator.error.identifier").toString());
+            result.addProperty("effect", screen.requireRegistryIdentifier(a, RegistrySuggestionKind.MOB_EFFECT, "gui.astral_craft.creator.error.identifier").toString());
             result.addProperty("duration_ticks", screen.requireInt(b, 1, Integer.MAX_VALUE, "gui.astral_craft.creator.error.number"));
             result.addProperty("amplifier", screen.requireInt(c, 0, 255, "gui.astral_craft.creator.error.number"));
             return result;
@@ -1483,7 +2090,7 @@ public class AstralDataEditorScreen extends Screen {
         CLEAR_EFFECT("gui.astral_craft.creator.effect.clear_effect", "gui.astral_craft.creator.arg.effect", "gui.astral_craft.creator.arg.all", "",
                 new DraftDefaults("minecraft:speed", "false", ""), target -> true, (screen, a, b, c) -> {
             JsonObject result = typed(AstralCraft.prefix("clear_effect"));
-            result.addProperty("effect", screen.requireIdentifier(a, "gui.astral_craft.creator.error.identifier").toString());
+            result.addProperty("effect", screen.requireRegistryIdentifier(a, RegistrySuggestionKind.MOB_EFFECT, "gui.astral_craft.creator.error.identifier").toString());
             result.addProperty("all", screen.requireBoolean(b, "gui.astral_craft.creator.error.boolean"));
             return result;
         }),
@@ -1540,6 +2147,32 @@ public class AstralDataEditorScreen extends Screen {
         }
     }
 
+    private enum RegistrySuggestionKind {
+        ITEM, BLOCK, ENTITY_TYPE, MOB_EFFECT, DIMENSION;
+
+        private List<Identifier> entries(AstralDataEditorScreen screen) {
+            return switch (this) {
+                case ITEM -> List.copyOf(BuiltInRegistries.ITEM.keySet());
+                case BLOCK -> List.copyOf(BuiltInRegistries.BLOCK.keySet());
+                case ENTITY_TYPE -> List.copyOf(BuiltInRegistries.ENTITY_TYPE.keySet());
+                case MOB_EFFECT -> List.copyOf(BuiltInRegistries.MOB_EFFECT.keySet());
+                case DIMENSION -> screen.minecraft.getConnection() == null
+                        ? List.of(Identifier.parse("minecraft:overworld"), Identifier.parse("minecraft:the_nether"), Identifier.parse("minecraft:the_end"))
+                        : screen.minecraft.getConnection().levels().stream().map(ResourceKey::identifier).toList();
+            };
+        }
+
+        private boolean contains(AstralDataEditorScreen screen, Identifier id) {
+            return switch (this) {
+                case ITEM -> BuiltInRegistries.ITEM.containsKey(id);
+                case BLOCK -> BuiltInRegistries.BLOCK.containsKey(id);
+                case ENTITY_TYPE -> BuiltInRegistries.ENTITY_TYPE.containsKey(id);
+                case MOB_EFFECT -> BuiltInRegistries.MOB_EFFECT.containsKey(id);
+                case DIMENSION -> screen.minecraft.getConnection() == null || screen.minecraft.getConnection().levels().stream().anyMatch(key -> key.identifier().equals(id));
+            };
+        }
+    }
+
     private enum AppearanceType {
         CARD_BACK("gui.astral_craft.creator.appearance.card_back", "textures/gui/cards/back", IMAGE_EXTENSIONS),
         DICE("gui.astral_craft.creator.appearance.dice", "textures/entity/dice/skins", IMAGE_EXTENSIONS),
@@ -1566,6 +2199,47 @@ public class AstralDataEditorScreen extends Screen {
 
         private boolean accepts(String extension) {
             return this.extensions.contains(extension);
+        }
+    }
+
+    private static class RgbColorControl {
+        private final EditBox box;
+        private int red;
+        private int green;
+        private int blue;
+        private int draggingChannel = -1;
+        private boolean updatingBox;
+
+        private RgbColorControl(EditBox box) {
+            this.box = box;
+            this.readBox(box.getValue());
+            box.setResponder(this::readBox);
+        }
+
+        private void readBox(String value) {
+            if (this.updatingBox || value == null || !value.matches("#[0-9A-Fa-f]{6}")) return;
+            int rgb = Integer.parseInt(value.substring(1), 16);
+            this.red = rgb >> 16 & 255;
+            this.green = rgb >> 8 & 255;
+            this.blue = rgb & 255;
+        }
+
+        private int channel(int channel) {
+            return switch (channel) { case 0 -> this.red; case 1 -> this.green; default -> this.blue; };
+        }
+
+        private void setChannel(int channel, int value) {
+            value = Math.clamp(value, 0, 255);
+            if (channel == 0) this.red = value;
+            else if (channel == 1) this.green = value;
+            else this.blue = value;
+            this.updatingBox = true;
+            this.box.setValue(String.format(Locale.ROOT, "#%02X%02X%02X", this.red, this.green, this.blue));
+            this.updatingBox = false;
+        }
+
+        private int rgb() {
+            return this.red << 16 | this.green << 8 | this.blue;
         }
     }
 
@@ -1665,12 +2339,18 @@ public class AstralDataEditorScreen extends Screen {
         }
 
         private JsonObject toJson(AstralDataEditorScreen screen) throws EditorException {
-            return this.selected ? this.type.encoder.encode(screen, this.arg1, this.arg2, this.arg3) : null;
+            if (!this.selected) return null;
+            try {
+                return this.type.encoder.encode(screen, this.arg1, this.arg2, this.arg3);
+            } catch (EditorException exception) {
+                throw exception.withContext(screen.eventContext(this.type.translationKey, "gui.astral_craft.creator.event.conditions"));
+            }
         }
     }
 
     private static class EffectDraft {
         private final EffectType type;
+        private final List<ItemStack> itemStacks = new ArrayList<>();
         private boolean selected;
         private Checkbox checkbox;
         private EditBox arg1;
@@ -1716,7 +2396,10 @@ public class AstralDataEditorScreen extends Screen {
         }
 
         private int argumentBlockHeight() {
-            return this.hasArguments() ? 14 + this.argumentCount() * ARGUMENT_ROW_HEIGHT : 0;
+            if (!this.hasArguments()) return 0;
+            int height = 14 + this.argumentCount() * ARGUMENT_ROW_HEIGHT;
+            if (this.type == EffectType.GIVE_ITEM) height += 26 + this.itemStacks.size() * 24;
+            return height;
         }
 
         private void hideArguments(AstralDataEditorScreen screen) {
@@ -1748,7 +2431,7 @@ public class AstralDataEditorScreen extends Screen {
             return y + ARGUMENT_ROW_HEIGHT;
         }
 
-        private void renderArgumentLabels(GuiGraphicsExtractor graphics, AstralDataEditorScreen screen, int x, int y, int width) {
+        private void renderArgumentLabels(GuiGraphicsExtractor graphics, AstralDataEditorScreen screen, int x, int y, int width, int mouseX, int mouseY) {
             if (!this.hasArguments()) return;
             graphics.text(screen.font, Component.translatable(this.type.translationKey), x + 4, y, 0xFFB9C6D8);
             int argX = x + 18;
@@ -1761,11 +2444,118 @@ public class AstralDataEditorScreen extends Screen {
                 screen.label(graphics, this.type.arg2, argX, argY);
                 argY += ARGUMENT_ROW_HEIGHT;
             }
-            if (!this.type.arg3.isEmpty()) screen.label(graphics, this.type.arg3, argX, argY);
+            if (!this.type.arg3.isEmpty()) {
+                screen.label(graphics, this.type.arg3, argX, argY);
+                argY += ARGUMENT_ROW_HEIGHT;
+            }
+            if (this.type == EffectType.GIVE_ITEM) this.renderItemControls(graphics, screen, argX, argY, Math.max(1, width - 18), mouseX, mouseY);
+        }
+
+        private void renderItemControls(GuiGraphicsExtractor graphics, AstralDataEditorScreen screen, int x, int y, int width, int mouseX, int mouseY) {
+            int leftW = Math.max(1, (width - GAP) / 2);
+            int rightW = Math.max(1, width - leftW - GAP);
+            screen.renderButton(graphics, x, y, leftW, 22, "gui.astral_craft.creator.item.add_typed", mouseX, mouseY, 0xFF5664B7, false);
+            screen.renderButton(graphics, x + leftW + GAP, y, rightW, 22, "gui.astral_craft.creator.item.add_inventory", mouseX, mouseY, 0xFF5664B7, false);
+            int rowY = y + 26;
+            for (ItemStack stack : this.itemStacks) {
+                graphics.fill(x, rowY, x + width, rowY + 21, 0x443B4250);
+                graphics.item(stack, x + 2, rowY + 2);
+                Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+                String label = stack.getHoverName().getString() + "  " + id + " x" + stack.getCount();
+                String shown = screen.font.plainSubstrByWidth(label, Math.max(1, width - 48));
+                graphics.text(screen.font, shown, x + 22, rowY + 7, 0xFFE6EDF7);
+                screen.renderButton(graphics, x + width - 22, rowY + 1, 21, 19, "gui.astral_craft.creator.item.remove_short", mouseX, mouseY, 0xFF8A4F5D, false);
+                if (screen.isInside(mouseX, mouseY, x, rowY, width - 24, 21)) {
+                    Component tooltip = Component.literal(stack.getHoverName().getString() + "\n" + id)
+                            .append("\n").append(Component.translatable("gui.astral_craft.creator.inventory_picker.data_kept"));
+                    graphics.setTooltipForNextFrame(screen.font, screen.font.split(tooltip, Math.clamp(screen.width - 32, 120, 260)), mouseX, mouseY);
+                }
+                rowY += 24;
+            }
+        }
+
+        private boolean handleSpecialClick(AstralDataEditorScreen screen, double mouseX, double mouseY) {
+            if (!this.selected || this.type != EffectType.GIVE_ITEM || !this.arg2.visible) return false;
+            int x = this.arg2.getX();
+            int width = this.arg2.getWidth();
+            int y = this.arg2.getY() + this.arg2.getHeight() + 4;
+            int leftW = Math.max(1, (width - GAP) / 2);
+            int rightW = Math.max(1, width - leftW - GAP);
+            if (screen.isInside(mouseX, mouseY, x, y, leftW, 22)) {
+                try {
+                    this.addTypedStack(screen);
+                    screen.status = Component.translatable("gui.astral_craft.creator.item.added");
+                    screen.statusError = false;
+                    screen.onDynamicLayoutChanged();
+                } catch (EditorException exception) {
+                    screen.setEditorError(exception.withContext(screen.eventContext(this.type.translationKey, "gui.astral_craft.creator.event.effects")));
+                }
+                return true;
+            }
+            if (screen.isInside(mouseX, mouseY, x + leftW + GAP, y, rightW, 22)) {
+                screen.openInventoryItemPicker(this);
+                return true;
+            }
+            int rowY = y + 26;
+            for (int index = 0; index < this.itemStacks.size(); index++) {
+                if (!screen.isInside(mouseX, mouseY, x + width - 22, rowY + 1, 21, 19)) {
+                    rowY += 24;
+                    continue;
+                }
+                this.itemStacks.remove(index);
+                screen.onDynamicLayoutChanged();
+                return true;
+            }
+            return false;
+        }
+
+        private boolean specialHovered(AstralDataEditorScreen screen, double mouseX, double mouseY) {
+            if (!this.selected || this.type != EffectType.GIVE_ITEM || !this.arg2.visible) return false;
+            int x = this.arg2.getX();
+            int width = this.arg2.getWidth();
+            int y = this.arg2.getY() + this.arg2.getHeight() + 4;
+            if (screen.isInside(mouseX, mouseY, x, y, width, 22)) return true;
+            int rowY = y + 26;
+            for (int index = 0; index < this.itemStacks.size(); index++) {
+                if (screen.isInside(mouseX, mouseY, x + width - 22, rowY + 1, 21, 19)) return true;
+                rowY += 24;
+            }
+            return false;
+        }
+
+        private void addTypedStack(AstralDataEditorScreen screen) throws EditorException {
+            Identifier id = screen.requireRegistryIdentifier(this.arg1, RegistrySuggestionKind.ITEM, "gui.astral_craft.creator.error.identifier");
+            int count = screen.requireInt(this.arg2, 1, 99, "gui.astral_craft.creator.error.number");
+            this.itemStacks.add(new ItemStack(BuiltInRegistries.ITEM.getValue(id), count));
+            this.arg1.setValue("");
+            this.arg2.setValue("1");
+        }
+
+        private void addInventoryStack(ItemStack stack) {
+            if (!stack.isEmpty()) this.itemStacks.add(stack.copy());
+        }
+
+        private List<ItemStack> exportStacks(AstralDataEditorScreen screen) throws EditorException {
+            List<ItemStack> values = new ArrayList<>();
+            for (ItemStack stack : this.itemStacks) if (!stack.isEmpty()) values.add(stack.copy());
+            if (!this.arg1.getValue().isBlank()) {
+                Identifier id = screen.requireRegistryIdentifier(this.arg1, RegistrySuggestionKind.ITEM, "gui.astral_craft.creator.error.identifier");
+                int count = screen.requireInt(this.arg2, 1, 99, "gui.astral_craft.creator.error.number");
+                values.add(new ItemStack(BuiltInRegistries.ITEM.getValue(id), count));
+            }
+            if (values.isEmpty()) throw new EditorException("gui.astral_craft.creator.error.item_stack_required");
+            return values;
         }
 
         private JsonObject toJson(AstralDataEditorScreen screen) throws EditorException {
-            return this.selected ? this.type.encoder.encode(screen, this.arg1, this.arg2, this.arg3) : null;
+            if (!this.selected) return null;
+            try {
+                if (this.type == EffectType.GIVE_ITEM) return screen.encodeGiveItemEffect(this);
+                return this.type.encoder.encode(screen, this.arg1, this.arg2, this.arg3);
+            } catch (EditorException exception) {
+                throw exception.withContext(screen.eventContext(this.type.translationKey,
+                        this.type.boardOnly() ? "gui.astral_craft.creator.event.board_effects" : "gui.astral_craft.creator.event.effects"));
+            }
         }
 
         private boolean compatibleWith(TargetScope target) {
@@ -1776,12 +2566,29 @@ public class AstralDataEditorScreen extends Screen {
     private static class EditorException extends Exception {
         private final String translationKey;
         private final Object[] args;
+        private final Component context;
 
         private EditorException(String translationKey, Object... args) {
+            this(translationKey, null, args);
+        }
+
+        private EditorException(String translationKey, Component context, Object[] args) {
             this.translationKey = translationKey;
             this.args = args;
+            this.context = context;
+        }
+
+        private EditorException withContext(Component context) {
+            return this.context == null ? new EditorException(this.translationKey, context, this.args) : this;
         }
     }
+
+    @FunctionalInterface
+    private interface EditorSupplier<T> {
+        T get() throws EditorException;
+    }
+
+    private record SuggestionBounds(int x, int y, int width, int height) {}
 
     private record EditorLayout(int panelX, int panelY, int panelW, int panelH) {
         private int panelRight() { return this.panelX + this.panelW; }

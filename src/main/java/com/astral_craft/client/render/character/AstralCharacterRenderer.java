@@ -4,16 +4,21 @@ import com.astral_craft.client.gameplay.character.ClientCharacterDefinitionCache
 import com.astral_craft.client.gui.board.BoardHudOverlay;
 import com.astral_craft.client.model.character.AstralCharacterAnimationRegistry;
 import com.astral_craft.client.model.character.AstralGeoAnimationManager;
+import com.astral_craft.client.model.character.AstralGeoModelDefinition;
+import com.astral_craft.client.model.character.AstralGeoModelManager;
 import com.astral_craft.common.entity.character.AstralCharacterEntity;
 import com.astral_craft.common.entity.character.ExhibitionCharacterEntity;
 import com.astral_craft.common.gameplay.character.CharacterDefinition;
 import com.astral_craft.common.gameplay.character.skin.CharacterSkinDefinition;
 import com.astral_craft.common.registry.AstralStatusEffects;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.player.PlayerModel;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.MobRenderer;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
 import net.minecraft.core.ClientAsset;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.PlayerModelType;
@@ -43,8 +48,8 @@ public class AstralCharacterRenderer<T extends AstralCharacterEntity> extends Mo
         CharacterDefinition definition = ClientCharacterDefinitionCache.INSTANCE.getOrFallback(state.characterId);
         CharacterSkinDefinition skin = definition.skinOrDefault(state.skinId);
         state.texture = skin.texture();
-        state.modelKey = definition.modelKey();
-        state.animationSetKey = definition.animationSetKey();
+        state.modelKey = skin.modelOr(definition.modelKey());
+        state.animationSetKey = skin.animationSetOr(definition.animationSetKey());
         state.knockedDown = entity.isBoardPawn() && "knockdown".equals(entity.animationAction());
         state.animationAction = AstralCharacterAnimationRegistry.clipName(state.characterId, entity.animationAction());
         state.animationTimeSeconds = entity.animationAgeTicks(partialTick) / 20.0F;
@@ -70,6 +75,20 @@ public class AstralCharacterRenderer<T extends AstralCharacterEntity> extends Mo
         if (entity.isBoardPawn()) {
             state.isInvisibleToPlayer = entity.boardSessionUuid().map(boardId -> !BoardHudOverlay.isTracking(boardId)).orElse(true);
         }
+    }
+
+    @Override
+    public void submit(AstralCharacterRenderState state, PoseStack poseStack, SubmitNodeCollector collector, CameraRenderState cameraState) {
+        AstralGeoModelDefinition model = AstralGeoModelManager.INSTANCE.get(state.modelKey);
+        if (model == null || !model.hasRenderableGeometry()) {
+            super.submit(state, poseStack, collector, cameraState);
+            return;
+        }
+        if (state.isInvisibleToPlayer) return;
+        poseStack.pushPose();
+        AstralGeoModelRenderer.submit(model, state.animationSetKey, state.animationAction, state.animationTimeSeconds,
+                state.skin.body().texturePath(), state.lightCoords, poseStack, collector);
+        poseStack.popPose();
     }
 
     @Override

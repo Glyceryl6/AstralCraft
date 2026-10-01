@@ -7,7 +7,9 @@ import net.minecraft.resources.Identifier;
 import java.util.List;
 import java.util.Optional;
 
-public record CharacterSkinDefinition(String id, String nameKey, Identifier texture, boolean unlockedByDefault, String rarity, BattlePresentation battlePresentation) {
+public record CharacterSkinDefinition(
+        String id, String nameKey, Identifier texture, boolean unlockedByDefault, String rarity,
+        Optional<Identifier> model, Optional<Identifier> animationSet, BattlePresentation battlePresentation) {
 
     public static final Codec<CharacterSkinDefinition> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.STRING.fieldOf("id").forGetter(CharacterSkinDefinition::id),
@@ -15,8 +17,14 @@ public record CharacterSkinDefinition(String id, String nameKey, Identifier text
             Identifier.CODEC.fieldOf("texture").forGetter(CharacterSkinDefinition::texture),
             Codec.BOOL.optionalFieldOf("unlocked_by_default", false).forGetter(CharacterSkinDefinition::unlockedByDefault),
             Codec.STRING.optionalFieldOf("rarity", "none").forGetter(CharacterSkinDefinition::rarity),
+            Identifier.CODEC.optionalFieldOf("model").forGetter(CharacterSkinDefinition::model),
+            Identifier.CODEC.optionalFieldOf("animation_set").forGetter(CharacterSkinDefinition::animationSet),
             BattlePresentation.CODEC.optionalFieldOf("battle", BattlePresentation.NONE).forGetter(CharacterSkinDefinition::battlePresentation)
     ).apply(instance, CharacterSkinDefinition::new));
+
+    public CharacterSkinDefinition(String id, String nameKey, Identifier texture, boolean unlockedByDefault, String rarity, BattlePresentation battlePresentation) {
+        this(id, nameKey, texture, unlockedByDefault, rarity, Optional.empty(), Optional.empty(), battlePresentation);
+    }
 
     public CharacterSkinDefinition(String id, String nameKey, Identifier texture, boolean unlockedByDefault, String rarity) {
         this(id, nameKey, texture, unlockedByDefault, rarity, BattlePresentation.NONE);
@@ -26,12 +34,16 @@ public record CharacterSkinDefinition(String id, String nameKey, Identifier text
         this(id, nameKey, texture, unlockedByDefault, "none");
     }
 
-    public CharacterSkinDefinition {
-        battlePresentation = battlePresentation == null ? BattlePresentation.NONE : battlePresentation;
+    public Identifier modelOr(Identifier fallback) {
+        return this.model.orElse(fallback);
+    }
+
+    public Identifier animationSetOr(Identifier fallback) {
+        return this.animationSet.orElse(fallback);
     }
 
     public String rarityOrNone() {
-        return this.rarity == null || this.rarity.isBlank() ? "none" : this.rarity;
+        return this.rarity.isBlank() ? "none" : this.rarity;
     }
 
     public String rarityOrCommon() {
@@ -49,13 +61,9 @@ public record CharacterSkinDefinition(String id, String nameKey, Identifier text
         ).apply(instance, BattlePresentation::new));
 
         public BattlePresentation {
-            if (backgrounds == null || backgrounds.isEmpty()) {
-                backgrounds = List.of();
-            } else {
-                backgrounds = List.copyOf(backgrounds.subList(0, Math.min(backgrounds.size(), MAX_BACKGROUND_FRAMES)));
-            }
+            backgrounds = backgrounds.isEmpty() ? List.of()
+                    : List.copyOf(backgrounds.subList(0, Math.min(backgrounds.size(), MAX_BACKGROUND_FRAMES)));
             frameTicks = Math.clamp(frameTicks, 1, 120);
-            bgm = bgm == null ? Optional.empty() : bgm;
         }
 
         public Identifier backgroundAt(int ageTicks) {
