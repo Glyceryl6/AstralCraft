@@ -174,18 +174,18 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
         return false;
     }
 
-    public boolean applyConfiguration(Identifier characterId, String skinId, double x, double y, double z, float yaw, float scale,
-                                      String customName, boolean showName, String speechText, String speechImage, boolean faceLookingPlayer,
-                                      float speechBubbleOffsetX, float speechBubbleOffsetY, float speechBubbleWidth, float speechBubbleScale,
-                                      boolean customSkinEnabled, boolean customSkinPlayer, String customSkinSource) {
+    public void applyConfiguration(Identifier characterId, String skinId, double x, double y, double z, float yaw, float scale,
+                                   String customName, boolean showName, String speechText, String speechImage, boolean faceLookingPlayer,
+                                   float speechBubbleOffsetX, float speechBubbleOffsetY, float speechBubbleWidth, float speechBubbleScale,
+                                   boolean customSkinEnabled, boolean customSkinPlayer, String customSkinSource) {
         if (!CharacterManager.INSTANCE.contains(characterId) || !Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)
                 || !Float.isFinite(yaw) || !Float.isFinite(scale) || (customName != null && customName.length() > MAX_CUSTOM_NAME_LENGTH)
                 || (speechText != null && speechText.length() > MAX_SPEECH_LENGTH) || !validSpeechImageSource(speechImage)
-                || !validSpeechBubbleLayout(speechBubbleOffsetX, speechBubbleOffsetY, speechBubbleWidth, speechBubbleScale)) return false;
-        if (customSkinEnabled && !validCustomSkinSource(customSkinPlayer, customSkinSource)) return false;
+                || !validSpeechBubbleLayout(speechBubbleOffsetX, speechBubbleOffsetY, speechBubbleWidth, speechBubbleScale)) return;
+        if (customSkinEnabled && !validCustomSkinSource(customSkinPlayer, customSkinSource)) return;
         CharacterDefinition definition = CharacterManager.INSTANCE.get(characterId);
         CharacterSkinDefinition skin = definition.skins().stream().filter(value -> value.id().equals(skinId)).findFirst().orElse(null);
-        if (skin == null) return false;
+        if (skin == null) return;
         this.setCharacterId(characterId);
         this.setSkinId(skin.id());
         this.setPos(x, y, z);
@@ -202,7 +202,6 @@ public class ExhibitionCharacterEntity extends AstralCharacterEntity {
         this.setCustomSkinSource(customSkinSource);
         this.setCustomSkinEnabled(customSkinEnabled);
         this.applyDisplayInvariants();
-        return true;
     }
 
     public void openConfiguration(ServerPlayer player) {

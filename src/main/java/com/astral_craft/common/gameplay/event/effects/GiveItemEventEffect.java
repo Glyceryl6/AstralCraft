@@ -13,13 +13,31 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
 
-public record GiveItemEventEffect(Holder<Item> item, int count) implements AstralEventEffect {
+import java.util.List;
+import java.util.Optional;
+
+public record GiveItemEventEffect(List<ItemStackTemplate> items) implements AstralEventEffect {
 
     public static final MapCodec<GiveItemEventEffect> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
-            Item.CODEC.fieldOf("id").forGetter(GiveItemEventEffect::item),
-            Codec.INT.optionalFieldOf("count", 1).forGetter(GiveItemEventEffect::count)
-    ).apply(instance, GiveItemEventEffect::new));
+            ItemStackTemplate.CODEC.listOf().optionalFieldOf("items", List.of()).forGetter(GiveItemEventEffect::items),
+            Item.CODEC.optionalFieldOf("id").forGetter(effect -> Optional.<Holder<Item>>empty()),
+            Codec.INT.optionalFieldOf("count", 1).forGetter(effect -> 1)
+    ).apply(instance, GiveItemEventEffect::decode));
+
+    public GiveItemEventEffect {
+        items = List.copyOf(items);
+    }
+
+    public GiveItemEventEffect(Holder<Item> item, int count) {
+        this(List.of(new ItemStackTemplate(item, Math.max(1, count))));
+    }
+
+    private static GiveItemEventEffect decode(List<ItemStackTemplate> items, Optional<Holder<Item>> legacyItem, int legacyCount) {
+        if (!items.isEmpty()) return new GiveItemEventEffect(items);
+        return legacyItem.map(item -> new GiveItemEventEffect(item, legacyCount)).orElseGet(() -> new GiveItemEventEffect(List.of()));
+    }
 
     @Override
     public String typeId() {
@@ -33,21 +51,28 @@ public record GiveItemEventEffect(Holder<Item> item, int count) implements Astra
 
     @Override
     public void apply(AstralEventContext context) {
-        int safeCount = Math.max(1, this.count);
+        if (this.items.isEmpty()) return;
         var boardTarget = BoardEventTargets.resolve(context);
         if (boardTarget.isPresent()) {
             var target = boardTarget.get();
-            var cardId = BuiltInRegistries.ITEM.getKey(this.item.value());
             var updated = target.participant();
-            for (int index = 0; index < safeCount; index++) updated = updated.addCard(cardId);
+            for (ItemStackTemplate template : this.items) {
+                ItemStack stack = template.create();
+                if (stack.isEmpty()) continue;
+                var cardId = BuiltInRegistries.ITEM.getKey(stack.getItem());
+                for (int index = 0; index < stack.getCount(); index++) updated = updated.addCard(cardId);
+            }
             BoardSessionManager.updateParticipant(target.level(), target.session(), updated);
             return;
         }
 
         ServerPlayer receiver = context.targetPlayer() != null ? context.targetPlayer() : context.triggerPlayer();
         if (receiver == null) return;
-        ItemStack stack = new ItemStack(this.item, safeCount);
-        if (!receiver.addItem(stack) && !stack.isEmpty()) receiver.drop(stack, false);
+        for (ItemStackTemplate template : this.items) {
+            ItemStack stack = template.create();
+            if (stack.isEmpty()) continue;
+            if (!receiver.addItem(stack) && !stack.isEmpty()) receiver.drop(stack, false);
+        }
     }
 
 }

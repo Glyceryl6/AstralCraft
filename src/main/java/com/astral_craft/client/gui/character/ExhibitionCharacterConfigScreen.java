@@ -1028,7 +1028,7 @@ public class ExhibitionCharacterConfigScreen extends Screen {
 
     private String validSkin(CharacterDefinition definition, String preferred) {
         if (definition == null || definition.skins().isEmpty()) return "default";
-        return definition.skins().stream().filter(skin -> skin.id().equals(preferred)).map(CharacterSkinDefinition::id)
+        return definition.skins().stream().map(CharacterSkinDefinition::id).filter(id -> id.equals(preferred))
                 .findFirst().orElse(definition.skins().getFirst().id());
     }
 
@@ -1419,8 +1419,8 @@ public class ExhibitionCharacterConfigScreen extends Screen {
         private int skinPanelW() {
             int screenW = Minecraft.getInstance().getWindow().getGuiScaledWidth();
             int available = Math.max(126, screenW - this.panelRight() - 12);
-            int desired = Math.clamp(screenW * 32 / 100, 150, 300);
-            return Math.min(desired, Math.max(126, available - 100));
+            int desired = Math.clamp(screenW * 32L / 100, 150, 300);
+            return Math.clamp(available - 100, 126, desired);
         }
         private int skinPanelX() { return Minecraft.getInstance().getWindow().getGuiScaledWidth() - this.skinPanelW() - 6; }
         private int skinPanelY() { return this.panelY; }
