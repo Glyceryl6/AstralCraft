@@ -12,7 +12,7 @@ import com.astral_craft.common.gameplay.character.CharacterDefinition;
 import com.astral_craft.common.gameplay.character.skin.CharacterSkinDefinition;
 import com.astral_craft.common.registry.AstralStatusEffects;
 import com.mojang.blaze3d.vertex.PoseStack;
-import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.PlayerSkinRenderCache;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.model.player.PlayerModel;
@@ -26,12 +26,28 @@ import net.minecraft.world.entity.player.PlayerSkin;
 import net.minecraft.world.item.component.ResolvableProfile;
 import org.jspecify.annotations.Nullable;
 
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public class AstralCharacterRenderer<T extends AstralCharacterEntity> extends MobRenderer<T, AstralCharacterRenderState, PlayerModel> {
 
+    private static final int MAX_CUSTOM_PLAYER_SKIN_LOOKUPS = 64;
+    private final PlayerSkinRenderCache playerSkinRenderCache;
+    private final Map<String, CompletableFuture<Optional<PlayerSkinRenderCache.RenderInfo>>> customPlayerSkinLookups =
+            new LinkedHashMap<>(16, 0.75F, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, CompletableFuture<Optional<PlayerSkinRenderCache.RenderInfo>>> eldest) {
+                    return this.size() > MAX_CUSTOM_PLAYER_SKIN_LOOKUPS;
+                }
+            };
+
     public AstralCharacterRenderer(EntityRendererProvider.Context context) {
         super(context, new PlayerModel(context.bakeLayer(ModelLayers.PLAYER), false), 0.25F);
+        this.playerSkinRenderCache = context.getPlayerSkinRenderCache();
         this.addLayer(new BoardKnockoutLayer(this));
     }
 
@@ -111,7 +127,10 @@ public class AstralCharacterRenderer<T extends AstralCharacterEntity> extends Mo
         }
 
         UUID uuid = ExhibitionCharacterEntity.parseCustomPlayerUuid(source);
+        String lookupKey = uuid == null ? source.toLowerCase(Locale.ROOT) : uuid.toString();
         ResolvableProfile profile = uuid == null ? ResolvableProfile.createUnresolved(source) : ResolvableProfile.createUnresolved(uuid);
-        return Minecraft.getInstance().playerSkinRenderCache().getOrDefault(profile).playerSkin();
+        CompletableFuture<Optional<PlayerSkinRenderCache.RenderInfo>> lookup = this.customPlayerSkinLookups.computeIfAbsent(lookupKey, ignored ->
+                this.playerSkinRenderCache.lookup(profile).exceptionally(exception -> Optional.empty()));
+        return lookup.getNow(Optional.empty()).map(PlayerSkinRenderCache.RenderInfo::playerSkin).orElse(null);
     }
 }

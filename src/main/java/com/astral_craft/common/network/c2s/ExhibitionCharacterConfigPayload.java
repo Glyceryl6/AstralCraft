@@ -70,16 +70,9 @@ public record ExhibitionCharacterConfigPayload(
         ByteBufCodecs.BOOL.encode(buffer, this.remove);
     }
 
-    public ExhibitionCharacterConfigPayload {
-        skinId = skinId == null ? "" : skinId;
-        customName = customName == null ? "" : customName;
-        speechText = speechText == null ? "" : speechText;
-        speechImage = speechImage == null ? "" : speechImage;
-        customSkinSource = customSkinSource == null ? "" : customSkinSource;
-    }
-
     @Override
     public Type<? extends CustomPacketPayload> type() {
         return TYPE;
     }
+
 }

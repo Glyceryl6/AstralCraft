@@ -77,15 +77,11 @@ public record OpenExhibitionCharacterConfigPayload(
 
     public OpenExhibitionCharacterConfigPayload {
         characters = List.copyOf(characters);
-        skinId = skinId == null ? "" : skinId;
-        customName = customName == null ? "" : customName;
-        speechText = speechText == null ? "" : speechText;
-        speechImage = speechImage == null ? "" : speechImage;
-        customSkinSource = customSkinSource == null ? "" : customSkinSource;
     }
 
     @Override
     public Type<? extends CustomPacketPayload> type() {
         return TYPE;
     }
+
 }
