@@ -27,7 +27,10 @@ public class AstralGeoAnimationManager extends SimpleJsonResourceReloadListener<
     protected void apply(Map<Identifier, AstralGeoAnimationSet> elements, ResourceManager resourceManager, ProfilerFiller profiler) {
         this.animationSets.clear();
         for (Map.Entry<Identifier, AstralGeoAnimationSet> entry : elements.entrySet()) {
-            this.animationSets.put(entry.getKey(), AstralGeoAnimationSet.read(entry.getKey(), entry.getValue().source()));
+            AstralGeoAnimationSet set = AstralGeoAnimationSet.read(entry.getKey(), entry.getValue().source());
+            this.animationSets.put(entry.getKey(), set);
+            String path = entry.getKey().getPath();
+            if (path.endsWith(".animation")) this.animationSets.putIfAbsent(Identifier.fromNamespaceAndPath(entry.getKey().getNamespace(), path.substring(0, path.length() - 10)), set);
         }
     }
 
@@ -42,6 +45,16 @@ public class AstralGeoAnimationManager extends SimpleJsonResourceReloadListener<
         return clip == null ? AstralGeoPose.IDENTITY : clip.sample(boneName, timeSeconds);
     }
 
+
+    public AstralGeoAnimationClip clip(Identifier id, String action) {
+        AstralGeoAnimationSet set = this.get(id);
+        return set == null ? null : set.clip(action);
+    }
+
+    public List<AstralGeoAnimationEvent> events(Identifier id, String action) {
+        AstralGeoAnimationClip clip = this.clip(id, action);
+        return clip == null ? List.of() : clip.events();
+    }
     public List<String> animationNames(Identifier id) {
         AstralGeoAnimationSet set = this.get(id);
         return set == null ? List.of("idle") : set.clipNames();

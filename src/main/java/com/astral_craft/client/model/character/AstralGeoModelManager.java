@@ -26,7 +26,10 @@ public class AstralGeoModelManager extends SimpleJsonResourceReloadListener<Astr
     protected void apply(Map<Identifier, AstralGeoModelDefinition> elements, ResourceManager resourceManager, ProfilerFiller profiler) {
         this.models.clear();
         for (Map.Entry<Identifier, AstralGeoModelDefinition> entry : elements.entrySet()) {
-            this.models.put(entry.getKey(), AstralGeoModelDefinition.read(entry.getKey(), entry.getValue().source()));
+            AstralGeoModelDefinition definition = AstralGeoModelDefinition.read(entry.getKey(), entry.getValue().source());
+            this.models.put(entry.getKey(), definition);
+            String path = entry.getKey().getPath();
+            if (path.endsWith(".geo")) this.models.putIfAbsent(Identifier.fromNamespaceAndPath(entry.getKey().getNamespace(), path.substring(0, path.length() - 4)), definition);
         }
     }
 
