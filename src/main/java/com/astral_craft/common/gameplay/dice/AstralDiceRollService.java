@@ -34,7 +34,7 @@ public class AstralDiceRollService {
     public static DiceRollResult rollNextMove(ServerPlayer player, Vec3 origin) {
         AstralPlayerStats stats = AstralStats.get(player);
         DiceRollResult result = rollNextMove(player, origin, stats);
-        AstralStats.set(player, stats.clearNextMoveDiceEffects());
+        AstralStats.set(player, stats.clearNextMoveDiceEffects().consumeMoveRollBuffs());
         return result;
     }
 

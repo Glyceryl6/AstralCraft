@@ -7,7 +7,6 @@ import com.astral_craft.common.network.s2c.OpenHandCardDeckPayload;
 import com.astral_craft.common.registry.AstralAttachments;
 import com.astral_craft.common.registry.AstralDataComponents;
 import com.astral_craft.common.registry.AstralItems;
-import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -56,11 +55,6 @@ public class AstralHandCardManager {
     public static void open(ServerPlayer player) {
         if (player == null) return;
         ActiveCharacterState state = player.getData(AstralAttachments.ACTIVE_CHARACTER);
-        if (!state.active()) {
-            player.sendSystemMessage(Component.translatable("message.astral_craft.hand_card_deck.need_character"), true);
-            return;
-        }
-
         PacketDistributor.sendToPlayer(player, new OpenHandCardDeckPayload(inventoryEffectCards(player), false));
     }
 

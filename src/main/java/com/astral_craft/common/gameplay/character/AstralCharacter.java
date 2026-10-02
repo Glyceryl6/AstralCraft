@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Registered character type. Static metadata and runtime mechanics live together; skins remain resource-pack driven.
+ * Registered character type. Properties/progression are the single source for runtime definitions; the data catalog only supplies localization and skin assets.
  */
 public class AstralCharacter {
 

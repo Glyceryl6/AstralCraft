@@ -59,12 +59,6 @@ public class CardUseService {
             return false;
         }
 
-        ActiveCharacterState state = CharacterProgressManager.activeState(player);
-        if (!state.active()) {
-            player.sendSystemMessage(Component.translatable("message.astral_craft.hand_card_deck.need_character"), true);
-            return false;
-        }
-
         ItemStack requestedStack = new ItemStack(item);
         ItemStack stack = AstralHandCardManager.firstInventoryCardStack(player, requestedStack);
         if (stack.isEmpty()) {

@@ -6,7 +6,12 @@ import com.astral_craft.common.gameplay.buff.BoardBuffInstance;
 public class HasteBoardBuff extends BoardBuff {
 
     public HasteBoardBuff(int color) {
-        super(Properties.of(color).stacking().permanent().consumeAfterMoveRoll());
+        super(Properties.of(color).permanent().consumeAfterMoveRoll());
+    }
+
+    @Override
+    public BoardBuffInstance merge(BoardBuffInstance current, BoardBuffInstance incoming) {
+        return incoming == null ? current : this.normalize(incoming);
     }
 
     @Override
