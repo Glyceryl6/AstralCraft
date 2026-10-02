@@ -13,4 +13,5 @@ public class AstralBlockTags {
     private static TagKey<Block> create(String path) {
         return TagKey.create(Registries.BLOCK, AstralCraft.prefix(path));
     }
+
 }
