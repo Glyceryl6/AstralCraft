@@ -10,18 +10,19 @@ import com.google.gson.JsonObject;
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import com.mojang.serialization.JsonOps;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Checkbox;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.RegistryOps;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemStackTemplate;
@@ -49,8 +50,10 @@ public class AstralDataEditorScreen extends Screen {
     private static final int CHECKBOX_GAP = 4;
     private static final int ARGUMENT_ROW_HEIGHT = 34;
     private static final int EVENT_SECTION_GAP = 8;
-    private static final int MAX_REGISTRY_SUGGESTIONS = 8;
-    private static final int SUGGESTION_ROW_HEIGHT = 20;
+    private static final int SUGGESTION_ROW_HEIGHT = 22;
+    private static final int SUGGESTION_ITEM_CELL = 20;
+    private static final int SUGGESTION_VISIBLE_ROWS = 6;
+    private static final int SUGGESTION_SCROLLBAR_WIDTH = 6;
     private static final int DATA_PACK_MAJOR = 101;
     private static final int DATA_PACK_MINOR = 1;
     private static final int RESOURCE_PACK_MAJOR = 84;
@@ -69,6 +72,9 @@ public class AstralDataEditorScreen extends Screen {
     private RegistrySuggestionKind registrySuggestionKind;
     private List<Identifier> registrySuggestions = List.of();
     private int registrySuggestionIndex;
+    private String registrySuggestionQuery = "";
+    private int registrySuggestionScrollRow;
+    private boolean registrySuggestionScrollbarDragging;
 
     private EditBox packNameBox;
 
@@ -280,16 +286,10 @@ public class AstralDataEditorScreen extends Screen {
         } else {
             this.renderClippedHintTooltip(graphics, mouseX, mouseY);
         }
-
-        if (this.registrySuggestionHovered(mouseX, mouseY)) {
-            graphics.requestCursor(CursorTypes.POINTING_HAND);
-        } else if (this.anyVisibleBoxHovered(mouseX, mouseY)) {
-            graphics.requestCursor(CursorTypes.IBEAM);
-        } else if (this.anyVisibleCheckboxHovered(mouseX, mouseY) || this.hoveredManualControl(layout, mouseX, mouseY)) {
-            graphics.requestCursor(CursorTypes.POINTING_HAND);
-        } else {
-            graphics.requestCursor(CursorTypes.ARROW);
-        }
+        if (this.registrySuggestionHovered(mouseX, mouseY)) graphics.requestCursor(CursorTypes.POINTING_HAND);
+        else if (this.anyVisibleBoxHovered(mouseX, mouseY)) graphics.requestCursor(CursorTypes.IBEAM);
+        else if (this.anyVisibleCheckboxHovered(mouseX, mouseY) || this.hoveredManualControl(layout, mouseX, mouseY)) graphics.requestCursor(CursorTypes.POINTING_HAND);
+        else graphics.requestCursor(CursorTypes.ARROW);
     }
 
     private void renderClippedHintTooltip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -315,27 +315,31 @@ public class AstralDataEditorScreen extends Screen {
         }
 
         if (focused == null || kind == null) {
-            this.registrySuggestionBox = null;
-            this.registrySuggestionKind = null;
-            this.registrySuggestions = List.of();
-            this.registrySuggestionIndex = 0;
+            this.closeRegistrySuggestions(false);
             return;
         }
 
         String value = focused.getValue();
         int comma = value.lastIndexOf(',');
         String token = value.substring(comma + 1).strip().toLowerCase(Locale.ROOT);
-        List<Identifier> matches = this.registrySuggestionCache.computeIfAbsent(kind, v -> v.entries(this).stream()
+        boolean changedSource = focused != this.registrySuggestionBox || kind != this.registrySuggestionKind;
+        if (!changedSource && token.equals(this.registrySuggestionQuery)) return;
+        List<Identifier> matches = this.registrySuggestionCache.computeIfAbsent(kind, suggestionKind -> suggestionKind.entries(this).stream()
                         .sorted(Comparator.comparing(Identifier::toString)).toList()).stream()
                 .filter(id -> !id.toString().equalsIgnoreCase(token))
                 .filter(id -> token.isEmpty() || id.toString().toLowerCase(Locale.ROOT).startsWith(token)
                         || id.getPath().toLowerCase(Locale.ROOT).startsWith(token))
-                .limit(MAX_REGISTRY_SUGGESTIONS)
                 .toList();
+        if (changedSource) {
+            this.registrySuggestionIndex = 0;
+            this.registrySuggestionScrollRow = 0;
+        }
         this.registrySuggestionBox = focused;
         this.registrySuggestionKind = kind;
+        this.registrySuggestionQuery = token;
         this.registrySuggestions = matches;
         this.registrySuggestionIndex = Math.clamp(this.registrySuggestionIndex, 0, Math.max(0, matches.size() - 1));
+        this.ensureSelectedRegistrySuggestionVisible();
     }
 
     private void renderRegistrySuggestions(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
@@ -343,31 +347,89 @@ public class AstralDataEditorScreen extends Screen {
         SuggestionBounds bounds = this.registrySuggestionBounds();
         AstralFancyButton.renderOutlinedBox(graphics, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
                 0xF0181B26, 0xFF6E7588, 0x00000000, 1, 0);
-        for (int index = 0; index < this.registrySuggestions.size(); index++) {
-            Identifier id = this.registrySuggestions.get(index);
-            int rowY = bounds.y() + index * SUGGESTION_ROW_HEIGHT;
-            boolean hovered = this.isInside(mouseX, mouseY, bounds.x(), rowY, bounds.width(), SUGGESTION_ROW_HEIGHT);
-            if (index == this.registrySuggestionIndex || hovered) graphics.fill(bounds.x() + 1, rowY + 1, bounds.x() + bounds.width() - 1, rowY + SUGGESTION_ROW_HEIGHT - 1, 0x554F6A9B);
-            int textX = bounds.x() + 5;
-            if (this.registrySuggestionKind == RegistrySuggestionKind.ITEM) {
-                ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.getValue(id));
-                graphics.item(stack, bounds.x() + 2, rowY + 2);
-                if (hovered) graphics.setTooltipForNextFrame(this.font, stack.getHoverName(), mouseX, mouseY);
-                textX += 18;
+        graphics.enableScissor(bounds.x() + 1, bounds.y() + 1, bounds.x() + bounds.width() - SUGGESTION_SCROLLBAR_WIDTH - 1, bounds.y() + bounds.height() - 1);
+        if (this.registrySuggestionKind == RegistrySuggestionKind.ITEM) this.renderItemRegistrySuggestions(graphics, bounds, mouseX, mouseY);
+        else this.renderListRegistrySuggestions(graphics, bounds, mouseX, mouseY);
+        graphics.disableScissor();
+        this.renderRegistrySuggestionScrollbar(graphics, bounds);
+    }
+
+    private void renderItemRegistrySuggestions(GuiGraphicsExtractor graphics, SuggestionBounds bounds, int mouseX, int mouseY) {
+        int columns = this.registrySuggestionColumns(bounds);
+        int start = this.registrySuggestionScrollRow * columns;
+        int end = Math.min(this.registrySuggestions.size(), start + columns * SUGGESTION_VISIBLE_ROWS);
+        for (int index = start; index < end; index++) {
+            int visibleIndex = index - start;
+            int x = bounds.x() + 3 + visibleIndex % columns * SUGGESTION_ITEM_CELL;
+            int y = bounds.y() + 3 + visibleIndex / columns * SUGGESTION_ITEM_CELL;
+            boolean hovered = this.isInside(mouseX, mouseY, x, y, SUGGESTION_ITEM_CELL, SUGGESTION_ITEM_CELL);
+            graphics.fill(x, y, x + SUGGESTION_ITEM_CELL, y + SUGGESTION_ITEM_CELL, 0xFF252A35);
+            graphics.outline(x, y, SUGGESTION_ITEM_CELL, SUGGESTION_ITEM_CELL, 0xFF4B5362);
+            if (index == this.registrySuggestionIndex || hovered) {
+                graphics.fill(x + 1, y + 1, x + SUGGESTION_ITEM_CELL - 1, y + SUGGESTION_ITEM_CELL - 1, 0x66566DB3);
+                graphics.outline(x, y, SUGGESTION_ITEM_CELL, SUGGESTION_ITEM_CELL, 0xFFA9B9E8);
             }
-            String shown = this.font.plainSubstrByWidth(id.toString(), Math.max(1, bounds.width() - (textX - bounds.x()) - 5));
-            graphics.text(this.font, shown, textX, rowY + 6, 0xFFE6EDF7);
+            ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.getValue(this.registrySuggestions.get(index)));
+            graphics.item(stack, x + 2, y + 2);
+            if (hovered) graphics.setTooltipForNextFrame(this.font, stack, mouseX, mouseY);
+        }
+    }
+
+    private void renderListRegistrySuggestions(GuiGraphicsExtractor graphics, SuggestionBounds bounds, int mouseX, int mouseY) {
+        int start = this.registrySuggestionScrollRow;
+        int end = Math.min(this.registrySuggestions.size(), start + SUGGESTION_VISIBLE_ROWS);
+        for (int index = start; index < end; index++) {
+            Identifier id = this.registrySuggestions.get(index);
+            int rowY = bounds.y() + (index - start) * SUGGESTION_ROW_HEIGHT;
+            boolean hovered = this.isInside(mouseX, mouseY, bounds.x() + 1, rowY, bounds.width() - SUGGESTION_SCROLLBAR_WIDTH - 2, SUGGESTION_ROW_HEIGHT);
+            if (index == this.registrySuggestionIndex || hovered) graphics.fill(bounds.x() + 1, rowY + 1, bounds.x() + bounds.width() - SUGGESTION_SCROLLBAR_WIDTH - 1, rowY + SUGGESTION_ROW_HEIGHT - 1, 0x554F6A9B);
+            int textX = bounds.x() + 5;
+            if (this.registrySuggestionKind == RegistrySuggestionKind.MOB_EFFECT) {
+                var effect = BuiltInRegistries.MOB_EFFECT.getValue(id);
+                graphics.blitSprite(RenderPipelines.GUI_TEXTURED, Gui.getMobEffectSprite(BuiltInRegistries.MOB_EFFECT.wrapAsHolder(effect)), bounds.x() + 3, rowY + 2, 18, 18);
+                textX += 20;
+                Component name = effect.getDisplayName();
+                int nameWidth = Math.min(this.font.width(name), Math.max(0, (bounds.width() - SUGGESTION_SCROLLBAR_WIDTH - (textX - bounds.x()) - 10) * 3 / 5));
+                String shownName = this.font.plainSubstrByWidth(name.getString(), nameWidth);
+                graphics.text(this.font, shownName, textX, rowY + 3, 0xFFF0F4FA);
+                int idX = textX + nameWidth + 6;
+                String shownId = this.font.plainSubstrByWidth(id.toString(), Math.max(1, bounds.width() - SUGGESTION_SCROLLBAR_WIDTH - (idX - bounds.x()) - 5));
+                graphics.text(this.font, shownId, idX, rowY + 3, 0xFF98A2B3);
+                if (hovered) graphics.setComponentTooltipForNextFrame(this.font, List.of(name, Component.literal(id.toString())), mouseX, mouseY);
+            } else {
+                String shown = this.font.plainSubstrByWidth(id.toString(), Math.max(1, bounds.width() - SUGGESTION_SCROLLBAR_WIDTH - (textX - bounds.x()) - 5));
+                graphics.text(this.font, shown, textX, rowY + 6, 0xFFE6EDF7);
+            }
         }
     }
 
     private SuggestionBounds registrySuggestionBounds() {
-        if (this.registrySuggestionBox == null) return new SuggestionBounds(0, 0, 0, 0);
-        int width = Math.clamp(Math.max(this.registrySuggestionBox.getWidth(), 180), 80, Math.max(80, this.width - 8));
-        int height = this.registrySuggestions.size() * SUGGESTION_ROW_HEIGHT;
+        if (this.registrySuggestionBox == null || this.registrySuggestionKind == null) return new SuggestionBounds(0, 0, 0, 0);
+        int width = this.registrySuggestionKind == RegistrySuggestionKind.ITEM
+                ? Math.clamp(Math.max(this.registrySuggestionBox.getWidth(), 188), 108, Math.max(108, this.width - 8))
+                : Math.clamp(Math.max(this.registrySuggestionBox.getWidth(), this.registrySuggestionKind == RegistrySuggestionKind.MOB_EFFECT ? 280 : 180), 80, Math.max(80, this.width - 8));
+        int rows = Math.min(SUGGESTION_VISIBLE_ROWS, this.registrySuggestionTotalRows(width));
+        int height = this.registrySuggestionKind == RegistrySuggestionKind.ITEM ? rows * SUGGESTION_ITEM_CELL + 6 : rows * SUGGESTION_ROW_HEIGHT;
         int x = Math.clamp(this.registrySuggestionBox.getX(), 4, Math.max(4, this.width - width - 4));
         int below = this.registrySuggestionBox.getY() + this.registrySuggestionBox.getHeight() + 1;
         int y = below + height <= this.height - 4 ? below : this.registrySuggestionBox.getY() - height - 1;
         return new SuggestionBounds(x, Math.max(4, y), width, height);
+    }
+
+    private int registrySuggestionColumns(SuggestionBounds bounds) {
+        return Math.max(1, (bounds.width() - SUGGESTION_SCROLLBAR_WIDTH - 6) / SUGGESTION_ITEM_CELL);
+    }
+
+    private int registrySuggestionTotalRows(int width) {
+        if (this.registrySuggestionKind != RegistrySuggestionKind.ITEM) return this.registrySuggestions.size();
+        int columns = Math.max(1, (width - SUGGESTION_SCROLLBAR_WIDTH - 6) / SUGGESTION_ITEM_CELL);
+        return (this.registrySuggestions.size() + columns - 1) / columns;
+    }
+
+    private int maxRegistrySuggestionScrollRow() {
+        if (this.registrySuggestions.isEmpty()) return 0;
+        SuggestionBounds bounds = this.registrySuggestionBounds();
+        return Math.max(0, this.registrySuggestionTotalRows(bounds.width()) - SUGGESTION_VISIBLE_ROWS);
     }
 
     private boolean registrySuggestionHovered(double mouseX, double mouseY) {
@@ -379,11 +441,61 @@ public class AstralDataEditorScreen extends Screen {
     private boolean handleRegistrySuggestionClick(double mouseX, double mouseY) {
         if (!this.registrySuggestionHovered(mouseX, mouseY)) return false;
         SuggestionBounds bounds = this.registrySuggestionBounds();
-        int index = (int) ((mouseY - bounds.y()) / SUGGESTION_ROW_HEIGHT);
-        if (index < 0 || index >= this.registrySuggestions.size()) return false;
+        if (this.isInside(mouseX, mouseY, bounds.x() + bounds.width() - SUGGESTION_SCROLLBAR_WIDTH, bounds.y(), SUGGESTION_SCROLLBAR_WIDTH, bounds.height()) && this.maxRegistrySuggestionScrollRow() > 0) {
+            this.registrySuggestionScrollbarDragging = true;
+            this.updateRegistrySuggestionScrollFromMouse(mouseY);
+            return true;
+        }
+        int index;
+        if (this.registrySuggestionKind == RegistrySuggestionKind.ITEM) {
+            int columns = this.registrySuggestionColumns(bounds);
+            int column = (int) ((mouseX - bounds.x() - 3) / SUGGESTION_ITEM_CELL);
+            int row = (int) ((mouseY - bounds.y() - 3) / SUGGESTION_ITEM_CELL);
+            if (column < 0 || column >= columns || row < 0 || row >= SUGGESTION_VISIBLE_ROWS) return true;
+            index = (this.registrySuggestionScrollRow + row) * columns + column;
+        } else {
+            int row = (int) ((mouseY - bounds.y()) / SUGGESTION_ROW_HEIGHT);
+            index = this.registrySuggestionScrollRow + row;
+        }
+        if (index < 0 || index >= this.registrySuggestions.size()) return true;
         this.registrySuggestionIndex = index;
         this.applyRegistrySuggestion(this.registrySuggestions.get(index));
         return true;
+    }
+
+    private void renderRegistrySuggestionScrollbar(GuiGraphicsExtractor graphics, SuggestionBounds bounds) {
+        int max = this.maxRegistrySuggestionScrollRow();
+        if (max <= 0) return;
+        int x = bounds.x() + bounds.width() - SUGGESTION_SCROLLBAR_WIDTH;
+        graphics.fill(x, bounds.y(), x + SUGGESTION_SCROLLBAR_WIDTH, bounds.y() + bounds.height(), 0x66505A68);
+        int totalRows = max + SUGGESTION_VISIBLE_ROWS;
+        int thumb = Math.max(14, bounds.height() * SUGGESTION_VISIBLE_ROWS / totalRows);
+        int y = bounds.y() + (bounds.height() - thumb) * this.registrySuggestionScrollRow / max;
+        graphics.fill(x + 1, y, x + SUGGESTION_SCROLLBAR_WIDTH - 1, y + thumb, 0xFFE83CA8);
+    }
+
+    private void updateRegistrySuggestionScrollFromMouse(double mouseY) {
+        int max = this.maxRegistrySuggestionScrollRow();
+        if (max <= 0) {
+            this.registrySuggestionScrollRow = 0;
+            return;
+        }
+        SuggestionBounds bounds = this.registrySuggestionBounds();
+        int totalRows = max + SUGGESTION_VISIBLE_ROWS;
+        int thumb = Math.max(14, bounds.height() * SUGGESTION_VISIBLE_ROWS / totalRows);
+        double progress = Math.clamp((mouseY - bounds.y() - thumb * 0.5D) / Math.max(1.0D, bounds.height() - thumb), 0.0D, 1.0D);
+        this.registrySuggestionScrollRow = (int) Math.round(progress * max);
+    }
+
+    private void ensureSelectedRegistrySuggestionVisible() {
+        if (this.registrySuggestions.isEmpty() || this.registrySuggestionKind == null) return;
+        SuggestionBounds bounds = this.registrySuggestionBounds();
+        int row = this.registrySuggestionKind == RegistrySuggestionKind.ITEM
+                ? this.registrySuggestionIndex / this.registrySuggestionColumns(bounds)
+                : this.registrySuggestionIndex;
+        if (row < this.registrySuggestionScrollRow) this.registrySuggestionScrollRow = row;
+        else if (row >= this.registrySuggestionScrollRow + SUGGESTION_VISIBLE_ROWS) this.registrySuggestionScrollRow = row - SUGGESTION_VISIBLE_ROWS + 1;
+        this.registrySuggestionScrollRow = Math.clamp(this.registrySuggestionScrollRow, 0, this.maxRegistrySuggestionScrollRow());
     }
 
     private void applyRegistrySuggestion(Identifier suggestion) {
@@ -393,7 +505,18 @@ public class AstralDataEditorScreen extends Screen {
         String prefix = comma < 0 ? "" : value.substring(0, comma + 1) + " ";
         this.registrySuggestionBox.setValue(prefix + suggestion);
         this.registrySuggestionBox.setCursorPosition(this.registrySuggestionBox.getValue().length());
+        this.closeRegistrySuggestions(false);
+    }
+
+    private void closeRegistrySuggestions(boolean clearFocus) {
+        if (clearFocus && this.registrySuggestionBox != null) this.registrySuggestionBox.setFocused(false);
+        this.registrySuggestionBox = null;
+        this.registrySuggestionKind = null;
         this.registrySuggestions = List.of();
+        this.registrySuggestionIndex = 0;
+        this.registrySuggestionQuery = "";
+        this.registrySuggestionScrollRow = 0;
+        this.registrySuggestionScrollbarDragging = false;
     }
 
     private void renderTabs(GuiGraphicsExtractor graphics, EditorLayout layout, int mouseX, int mouseY) {
@@ -605,6 +728,7 @@ public class AstralDataEditorScreen extends Screen {
         double mouseX = event.x();
         double mouseY = event.y();
         if (this.handleRegistrySuggestionClick(mouseX, mouseY)) return true;
+        if (!this.registrySuggestions.isEmpty() && (this.registrySuggestionBox == null || !this.registrySuggestionBox.isMouseOver(mouseX, mouseY))) this.closeRegistrySuggestions(true);
         if (this.isInside(mouseX, mouseY, layout.topCloseX(), layout.topCloseY(), layout.topCloseW(), 16)) {
             this.onClose();
             return true;
@@ -694,6 +818,10 @@ public class AstralDataEditorScreen extends Screen {
 
     @Override
     public boolean mouseDragged(@NonNull MouseButtonEvent event, double dragX, double dragY) {
+        if (event.button() == 0 && this.registrySuggestionScrollbarDragging) {
+            this.updateRegistrySuggestionScrollFromMouse(event.y());
+            return true;
+        }
         if (event.button() == 0 && this.activeColorControl() != null) {
             this.updateActiveColor(this.layout(), event.x());
             return true;
@@ -707,6 +835,10 @@ public class AstralDataEditorScreen extends Screen {
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
+        if (event.button() == 0 && this.registrySuggestionScrollbarDragging) {
+            this.registrySuggestionScrollbarDragging = false;
+            return true;
+        }
         if (event.button() == 0 && this.activeColorControl() != null) {
             this.clearColorDragging();
             return true;
@@ -720,6 +852,11 @@ public class AstralDataEditorScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double deltaX, double deltaY) {
+        if (this.registrySuggestionHovered(mouseX, mouseY)) {
+            int max = this.maxRegistrySuggestionScrollRow();
+            if (max > 0) this.registrySuggestionScrollRow = Math.clamp(this.registrySuggestionScrollRow - (int) Math.signum(deltaY), 0, max);
+            return true;
+        }
         EditorLayout layout = this.layout();
         if (this.isInside(mouseX, mouseY, layout.tabContentX(), layout.tabViewportTop(), layout.contentRight() - layout.tabContentX(), layout.tabViewportH())) {
             this.setTabScrollOffset(layout, this.tabScrollOffset() - (int) Math.signum(deltaY) * 24);
@@ -831,10 +968,12 @@ public class AstralDataEditorScreen extends Screen {
         if (!this.registrySuggestions.isEmpty()) {
             if (event.key() == GLFW.GLFW_KEY_DOWN) {
                 this.registrySuggestionIndex = (this.registrySuggestionIndex + 1) % this.registrySuggestions.size();
+                this.ensureSelectedRegistrySuggestionVisible();
                 return true;
             }
             if (event.key() == GLFW.GLFW_KEY_UP) {
                 this.registrySuggestionIndex = (this.registrySuggestionIndex - 1 + this.registrySuggestions.size()) % this.registrySuggestions.size();
+                this.ensureSelectedRegistrySuggestionVisible();
                 return true;
             }
             if (event.key() == GLFW.GLFW_KEY_TAB || event.key() == GLFW.GLFW_KEY_ENTER) {
@@ -1824,6 +1963,7 @@ public class AstralDataEditorScreen extends Screen {
                     || this.isTabControlVisible(layout, targetY, FIELD_HEIGHT)
                     && this.isInside(mouseX, mouseY, layout.eventMetaX(3), targetY, layout.eventMetaW(), FIELD_HEIGHT);
         }
+
         if (this.tab == EditorTab.CHARACTER_SKIN || this.tab == EditorTab.SKIN_RARITY) {
             int readY = this.tabStartY(layout) + 44;
             if (this.isTabControlVisible(layout, readY, FIELD_HEIGHT)
@@ -1840,6 +1980,7 @@ public class AstralDataEditorScreen extends Screen {
                 }
             }
         }
+
         if (this.tab == EditorTab.APPEARANCE) {
             int start = this.tabStartY(layout);
             return this.isTabControlVisible(layout, start + 44, FIELD_HEIGHT)
@@ -1847,6 +1988,7 @@ public class AstralDataEditorScreen extends Screen {
                     || this.isTabControlVisible(layout, start + 68, FIELD_HEIGHT)
                     && this.isInside(mouseX, mouseY, layout.leftX(), start + 68, layout.halfW(), FIELD_HEIGHT);
         }
+
         if (this.tab == EditorTab.EXPORT) {
             int start = this.tabStartY(layout);
             int chooseY = start + 44;
@@ -2156,9 +2298,9 @@ public class AstralDataEditorScreen extends Screen {
                 case BLOCK -> List.copyOf(BuiltInRegistries.BLOCK.keySet());
                 case ENTITY_TYPE -> List.copyOf(BuiltInRegistries.ENTITY_TYPE.keySet());
                 case MOB_EFFECT -> List.copyOf(BuiltInRegistries.MOB_EFFECT.keySet());
-                case DIMENSION -> screen.minecraft.getConnection() == null
+                case DIMENSION -> screen.minecraft == null || screen.minecraft.getConnection() == null
                         ? List.of(Identifier.parse("minecraft:overworld"), Identifier.parse("minecraft:the_nether"), Identifier.parse("minecraft:the_end"))
-                        : screen.minecraft.getConnection().levels().stream().map(ResourceKey::identifier).toList();
+                        : screen.minecraft.getConnection().levels().stream().map(key -> key.identifier()).toList();
             };
         }
 
@@ -2168,7 +2310,8 @@ public class AstralDataEditorScreen extends Screen {
                 case BLOCK -> BuiltInRegistries.BLOCK.containsKey(id);
                 case ENTITY_TYPE -> BuiltInRegistries.ENTITY_TYPE.containsKey(id);
                 case MOB_EFFECT -> BuiltInRegistries.MOB_EFFECT.containsKey(id);
-                case DIMENSION -> screen.minecraft.getConnection() == null || screen.minecraft.getConnection().levels().stream().anyMatch(key -> key.identifier().equals(id));
+                case DIMENSION -> screen.minecraft == null || screen.minecraft.getConnection() == null
+                        || screen.minecraft.getConnection().levels().stream().anyMatch(key -> key.identifier().equals(id));
             };
         }
     }
@@ -2457,7 +2600,8 @@ public class AstralDataEditorScreen extends Screen {
             screen.renderButton(graphics, x, y, leftW, 22, "gui.astral_craft.creator.item.add_typed", mouseX, mouseY, 0xFF5664B7, false);
             screen.renderButton(graphics, x + leftW + GAP, y, rightW, 22, "gui.astral_craft.creator.item.add_inventory", mouseX, mouseY, 0xFF5664B7, false);
             int rowY = y + 26;
-            for (ItemStack stack : this.itemStacks) {
+            for (int index = 0; index < this.itemStacks.size(); index++) {
+                ItemStack stack = this.itemStacks.get(index);
                 graphics.fill(x, rowY, x + width, rowY + 21, 0x443B4250);
                 graphics.item(stack, x + 2, rowY + 2);
                 Identifier id = BuiltInRegistries.ITEM.getKey(stack.getItem());
@@ -2468,7 +2612,7 @@ public class AstralDataEditorScreen extends Screen {
                 if (screen.isInside(mouseX, mouseY, x, rowY, width - 24, 21)) {
                     Component tooltip = Component.literal(stack.getHoverName().getString() + "\n" + id)
                             .append("\n").append(Component.translatable("gui.astral_craft.creator.inventory_picker.data_kept"));
-                    graphics.setTooltipForNextFrame(screen.font, screen.font.split(tooltip, Math.clamp(screen.width - 32, 120, 260)), mouseX, mouseY);
+                    graphics.setTooltipForNextFrame(screen.font, screen.font.split(tooltip, Math.min(260, Math.max(120, screen.width - 32))), mouseX, mouseY);
                 }
                 rowY += 24;
             }
