@@ -1,9 +1,14 @@
 package com.astral_craft.client.gui.phrase;
 
 import com.astral_craft.client.gui.components.AstralFancyButton;
+import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.CharacterEvent;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
@@ -43,8 +48,10 @@ public class QuickPhraseSidebar {
     protected float dragStartScrollY;
 
     protected boolean addDialogOpen;
-    protected String addDialogText = "";
-    protected int addDialogCursor;
+    protected EditBox addDialogInput;
+    protected int addDialogSelectionAnchor;
+    protected Screen addDialogScreen;
+    protected GuiEventListener addDialogPreviousFocus;
 
     protected boolean hoveringInteractiveButton;
 
@@ -74,10 +81,14 @@ public class QuickPhraseSidebar {
         this.renderTopTabs(graphics, font, x, y, mouseX, mouseY);
         this.renderContent(graphics, font, x, y, h, screenHeight, mouseX, mouseY);
         if (this.addDialogOpen) {
+            this.hoveringInteractiveButton = false;
+            AstralFancyButton.setHandCursor(false);
             this.renderAddDialog(graphics, font, screenWidth, screenHeight, mouseX, mouseY);
+            graphics.requestCursor(this.addDialogInput.isMouseOver(mouseX, mouseY) ? CursorTypes.IBEAM
+                    : this.hoveringInteractiveButton ? CursorTypes.POINTING_HAND : CursorTypes.ARROW);
+        } else {
+            AstralFancyButton.setHandCursor(this.hoveringInteractiveButton);
         }
-
-        AstralFancyButton.setHandCursor(this.hoveringInteractiveButton);
     }
 
     protected void renderTopTabs(GuiGraphicsExtractor graphics, Font font, int panelX, int panelY, int mouseX, int mouseY) {
@@ -182,16 +193,14 @@ public class QuickPhraseSidebar {
         int inputX = x + 10;
         int inputY = y + 34;
         int inputW = w - 20;
-        int inputH = 22;
-        graphics.fill(inputX, inputY, inputX + inputW, inputY + inputH, 0xFF090910);
-        graphics.fill(inputX, inputY, inputX + inputW, inputY + 1, 0xAAFFFFFF);
-        Component display = this.addDialogText.isEmpty() ? Component.translatable("gui.astral_craft.quick_phrases.input_hint") : Component.literal(this.addDialogText);
-        int textColor = this.addDialogText.isEmpty() ? 0xFF777788 : 0xFFFFFFFF;
-        graphics.text(font, display, inputX + 5, inputY + 7, textColor, false);
-        int cursorX = inputX + 5 + font.width(this.addDialogText.substring(0, Math.min(this.addDialogCursor, this.addDialogText.length())));
-        if ((System.currentTimeMillis() / 500L) % 2L == 0L) {
-            graphics.fill(cursorX, inputY + 5, cursorX + 1, inputY + inputH - 5, 0xFFFFFFFF);
+        this.addDialogInput.setX(inputX);
+        this.addDialogInput.setY(inputY);
+        this.addDialogInput.setWidth(inputW);
+        if (this.addDialogScreen.getFocused() != this.addDialogInput) {
+            this.addDialogPreviousFocus = this.addDialogScreen.getFocused();
+            this.addDialogScreen.setFocused(this.addDialogInput);
         }
+        this.addDialogInput.extractRenderState(graphics, mouseX, mouseY, 0.0F);
 
         int btnW = 72;
         int btnY = y + h - 34;
@@ -214,13 +223,21 @@ public class QuickPhraseSidebar {
     }
 
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick, int screenWidth, int screenHeight) {
+        if (this.addDialogOpen) {
+            if (event.button() != GLFW.GLFW_MOUSE_BUTTON_LEFT) return true;
+            this.addDialogInput.setX((screenWidth - Math.min(300, screenWidth - 40)) / 2 + 10);
+            this.addDialogInput.setY((screenHeight - 118) / 2 + 34);
+            this.addDialogInput.setWidth(Math.min(300, screenWidth - 40) - 20);
+            if (this.addDialogInput.mouseClicked(event, doubleClick)) {
+                this.addDialogSelectionAnchor = this.addDialogInput.getCursorPosition();
+                this.dragTarget = DragTarget.DIALOG_TEXT;
+                return true;
+            }
+            return this.handleDialogClick(event.x(), event.y(), screenWidth, screenHeight);
+        }
         if (event.button() != GLFW.GLFW_MOUSE_BUTTON_LEFT) return false;
         double mx = event.x();
         double my = event.y();
-
-        if (this.addDialogOpen) {
-            return this.handleDialogClick(mx, my, screenWidth, screenHeight);
-        }
 
         int toggleX = this.toggleX(screenWidth);
         int toggleY = this.toggleY(screenHeight);
@@ -330,9 +347,20 @@ public class QuickPhraseSidebar {
 
     protected boolean handlePlayerActionClick(double mx, double my, int x, int y, int w) {
         if (this.isInside(mx, my, x, y, w, 24)) {
+            Minecraft minecraft = Minecraft.getInstance();
+            this.addDialogScreen = minecraft.screen;
+            if (this.addDialogScreen == null) return true;
+            int dialogWidth = Math.min(300, this.addDialogScreen.width - 40);
+            this.addDialogInput = new EditBox(minecraft.font, (this.addDialogScreen.width - dialogWidth) / 2 + 10,
+                    (this.addDialogScreen.height - 118) / 2 + 34, dialogWidth - 20, 22,
+                    Component.translatable("gui.astral_craft.quick_phrases.input_hint"));
+            this.addDialogInput.setMaxLength(256);
+            this.addDialogInput.setHint(Component.translatable("gui.astral_craft.quick_phrases.input_hint"));
+            this.addDialogInput.setCanLoseFocus(false);
+            this.addDialogPreviousFocus = this.addDialogScreen.getFocused();
+            this.addDialogScreen.setFocused(this.addDialogInput);
             this.addDialogOpen = true;
-            this.addDialogText = "";
-            this.addDialogCursor = 0;
+            this.dragTarget = DragTarget.NONE;
             return true;
         }
 
@@ -381,6 +409,14 @@ public class QuickPhraseSidebar {
     }
 
     public boolean mouseDragged(MouseButtonEvent event, int screenHeight) {
+        if (this.addDialogOpen) {
+            if (this.dragTarget == DragTarget.DIALOG_TEXT && event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                // Use EditBox's click hit-testing so horizontal scrolling and glyph widths stay consistent.
+                this.addDialogInput.onClick(event, false);
+                this.addDialogInput.setHighlightPos(this.addDialogSelectionAnchor);
+            }
+            return true;
+        }
         if (this.dragTarget == DragTarget.NONE) return false;
         float maxScroll = this.dragTarget == DragTarget.MOD_TABS ? this.maxModTabScroll(screenHeight) : this.maxPhraseScroll(screenHeight);
         int listH = this.panelHeight(screenHeight) - 64;
@@ -397,6 +433,11 @@ public class QuickPhraseSidebar {
     }
 
     public boolean mouseReleased(MouseButtonEvent event) {
+        if (this.addDialogOpen) {
+            this.addDialogInput.mouseReleased(event);
+            if (event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT) this.dragTarget = DragTarget.NONE;
+            return true;
+        }
         if (event.button() == GLFW.GLFW_MOUSE_BUTTON_LEFT && this.dragTarget != DragTarget.NONE) {
             this.dragTarget = DragTarget.NONE;
             return true;
@@ -406,7 +447,8 @@ public class QuickPhraseSidebar {
     }
 
     public boolean mouseScrolled(double mouseX, double mouseY, double deltaY, int screenWidth, int screenHeight) {
-        if (!this.expanded || this.addDialogOpen) return false;
+        if (this.addDialogOpen) return true;
+        if (!this.expanded) return false;
         int x = this.panelX(screenWidth);
         int y = this.panelY();
         int contentY = y + 54;
@@ -439,53 +481,13 @@ public class QuickPhraseSidebar {
             return true;
         }
 
-        if (key == GLFW.GLFW_KEY_BACKSPACE) {
-            if (this.addDialogCursor > 0 && !this.addDialogText.isEmpty()) {
-                this.addDialogText = this.addDialogText.substring(0, this.addDialogCursor - 1) + this.addDialogText.substring(this.addDialogCursor);
-                this.addDialogCursor--;
-            }
-            return true;
-        }
-
-        if (key == GLFW.GLFW_KEY_DELETE) {
-            if (this.addDialogCursor < this.addDialogText.length()) {
-                this.addDialogText = this.addDialogText.substring(0, this.addDialogCursor) + this.addDialogText.substring(this.addDialogCursor + 1);
-            }
-            return true;
-        }
-
-        if (key == GLFW.GLFW_KEY_LEFT) {
-            this.addDialogCursor = Math.max(0, this.addDialogCursor - 1);
-            return true;
-        }
-
-        if (key == GLFW.GLFW_KEY_RIGHT) {
-            this.addDialogCursor = Math.min(this.addDialogText.length(), this.addDialogCursor + 1);
-            return true;
-        }
-
-        if (key == GLFW.GLFW_KEY_HOME) {
-            this.addDialogCursor = 0;
-            return true;
-        }
-
-        if (key == GLFW.GLFW_KEY_END) {
-            this.addDialogCursor = this.addDialogText.length();
-            return true;
-        }
-
+        this.addDialogInput.keyPressed(event);
         return true;
     }
 
     public boolean charTyped(int codePoint) {
         if (!this.addDialogOpen) return false;
-        if (Character.isISOControl(codePoint)) return true;
-        String text = new String(Character.toChars(codePoint));
-        if (this.addDialogText.length() + text.length() <= 256) {
-            this.addDialogText = this.addDialogText.substring(0, this.addDialogCursor) + text + this.addDialogText.substring(this.addDialogCursor);
-            this.addDialogCursor += text.length();
-        }
-
+        this.addDialogInput.charTyped(new CharacterEvent(codePoint));
         return true;
     }
 
@@ -496,15 +498,24 @@ public class QuickPhraseSidebar {
     }
 
     protected void saveDialogPhrase() {
-        PlayerQuickPhraseConfig.add(this.addDialogText);
+        PlayerQuickPhraseConfig.add(this.addDialogInput.getValue());
         this.selectedPlayerPhrase = PlayerQuickPhraseConfig.phrases().size() - 1;
         this.closeDialog();
     }
 
     protected void closeDialog() {
         this.addDialogOpen = false;
-        this.addDialogText = "";
-        this.addDialogCursor = 0;
+        this.dragTarget = DragTarget.NONE;
+        if (this.addDialogInput != null) {
+            this.addDialogInput.setCanLoseFocus(true);
+            this.addDialogInput.setFocused(false);
+            if (this.addDialogScreen != null && this.addDialogScreen.getFocused() == this.addDialogInput) {
+                this.addDialogScreen.setFocused(this.addDialogPreviousFocus);
+            }
+        }
+        this.addDialogInput = null;
+        this.addDialogScreen = null;
+        this.addDialogPreviousFocus = null;
     }
 
     protected List<DisplayPhrase> currentPhrases() {
@@ -550,6 +561,11 @@ public class QuickPhraseSidebar {
         }
 
         return Component.literal(out + suffix);
+    }
+
+    public void removed() {
+        this.closeDialog();
+        AstralFancyButton.setHandCursor(false);
     }
 
     public boolean isExpanded() {
@@ -644,7 +660,7 @@ public class QuickPhraseSidebar {
 
     protected enum Tab { MOD, PLAYER }
 
-    protected enum DragTarget { NONE, MOD_TABS, PHRASES }
+    protected enum DragTarget { NONE, MOD_TABS, PHRASES, DIALOG_TEXT }
 
     protected record DisplayPhrase(Component component) {}
 

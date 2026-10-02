@@ -27,6 +27,11 @@ public abstract class MixinChatScreen extends Screen implements QuickPhraseSideb
         return this.astralCraft$quickPhraseSidebar;
     }
 
+    @Inject(method = "removed", at = @At("TAIL"))
+    private void astralCraft$closeQuickPhraseDialog(CallbackInfo ci) {
+        this.astralCraft$quickPhraseSidebar.removed();
+    }
+
     @Inject(method = "extractRenderState", at = @At("TAIL"))
     private void astralCraft$renderQuickPhrases(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a, CallbackInfo ci) {
         this.astralCraft$quickPhraseSidebar.render(graphics, this.font, this.width, this.height, mouseX, mouseY);
