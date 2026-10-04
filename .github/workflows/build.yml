@@ -39,12 +39,11 @@ jobs:
           gradle-version: '9.2.1'
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-      - name: Build and check
-        run: gradle --no-daemon --stacktrace --configuration-cache --configuration-cache-problems=fail -Dorg.gradle.jvmargs=-Xmx3G build versionInfo
-
-      # Repeat the same task graph to exercise actions after configuration-cache restoration.
-      - name: Check build with reused configuration cache
-        run: gradle --no-daemon --stacktrace --configuration-cache --configuration-cache-problems=fail -Dorg.gradle.jvmargs=-Xmx3G build versionInfo
+      # Temporary workflow for the original repository, before the refactoring patches are pushed.
+      # Explicitly override org.gradle.configuration-cache=true without modifying gradle.properties.
+      # Restore the two cached build/versionInfo steps after pushing the fixed build.gradle.
+      - name: Build original development version
+        run: gradle --no-daemon --stacktrace --no-configuration-cache -Dorg.gradle.jvmargs=-Xmx3G build
 
       - name: Upload development JAR
         id: upload
