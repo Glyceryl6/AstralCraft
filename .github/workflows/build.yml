@@ -11,7 +11,8 @@ permissions:
 
 concurrency:
   group: build-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Let an active release finish uploading its assets.
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -60,18 +61,74 @@ jobs:
           retention-days: 30
           compression-level: 0
 
-      - name: Write download instructions
+      - name: Write build artifact instructions
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
           BUILD_SHA: ${{ github.sha }}
         run: |
           {
-            echo '### Astral Craft 开发构建'
+            echo '### Astral Craft 构建产物'
             echo
             echo "提交：\`$BUILD_SHA\`"
             echo
-            echo "[下载开发构建]($ARTIFACT_URL)（需要登录 GitHub）"
+            echo "[下载 Actions 构建产物]($ARTIFACT_URL)（需要登录 GitHub）"
             echo
             echo '解压下载的 ZIP，将其中的模组 JAR 放进 Minecraft 26.1.2 / NeoForge 实例的 mods 文件夹。'
-            echo 'Java 版本：25。客户端与服务器请使用同一构建。产物保留 30 天，实际期限受仓库设置限制。'
+            echo '默认分支构建成功后，发布任务会提供 Releases 下载入口。PR 和其他分支仅保留 Actions 产物。'
+            echo 'Actions 产物保留 30 天，实际期限受仓库设置限制。'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Publish development release
+    needs: build
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download this build's JAR
+        uses: actions/download-artifact@v5
+        with:
+          name: astral-craft-dev-${{ github.run_number }}-${{ github.run_attempt }}-${{ github.sha }}
+          path: release-assets
+
+      - name: Publish development prerelease
+        id: release
+        uses: softprops/action-gh-release@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: dev-${{ github.run_id }}-${{ github.run_attempt }}
+          target_commitish: ${{ github.sha }}
+          name: "Astral Craft 开发构建 #${{ github.run_number }}.${{ github.run_attempt }}"
+          prerelease: true
+          make_latest: 'false'
+          fail_on_unmatched_files: true
+          files: release-assets/*.jar
+          body: |
+            这是开发体验版本。
+
+            **下载方法：** 展开下方 Assets，点击 `.jar` 文件下载。公开仓库无需 GitHub 账号。
+            将下载的 JAR 放入游戏实例的 `mods` 文件夹；不要下载自动生成的 Source code 压缩包。
+
+            - Minecraft：26.1.2
+            - NeoForge：26.1.2.75
+            - Java：25
+            - 客户端与服务器请使用同一次构建。
+            - 对应提交：`${{ github.sha }}`
+            - [构建记录](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+      - name: Write public download instructions
+        shell: bash
+        env:
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+        run: |
+          {
+            echo '### Astral Craft 开发版已发布'
+            echo
+            echo "[前往 Releases 下载 JAR]($RELEASE_URL)"
+            echo
+            echo '公开仓库无需 GitHub 账号；展开 Assets 后下载 .jar 文件，放入 mods 文件夹。'
           } >> "$GITHUB_STEP_SUMMARY"
